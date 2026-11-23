@@ -57,3 +57,38 @@ The existing RescueMatcher source rejected any interpreter capacity greater than
 Fix: interpret **intake capability** independent of lot quantity (still capped by the signed kitchen's nominal capacity), then deterministically cap actual allocation by lot quantity. Added direct-mode regression test covering 16 in inventory and 18 receivable, expected 16 allocated.
 
 **Deployment warning:** editing GitHub source does NOT change the existing deployed contract at `0xb26b2C9b2aa91D275055B32b861D5276dC3D0347`. To deploy patched code, create a NEW RescueMatcher and a NEW HandoffLedger whose constructor is the new matcher address. The earlier successful 18→16 PARTIAL proof remains at the original pair. A failed `match_case` rollback does not create a new allocation. Re-running on the old contract may behave differently due to LLM nondeterminism, but may fail again and consume more test GEN.
+
+
+## Studionet incident 2026-11-23: late Kitchen B consensus undetermined twice
+
+The first matching transaction for sealed case `lastcrate-231126-lateb`,
+`0xada119cf799312a1deff9053577d7eeeafe9ebb04b9457dbc4a438919e774655`,
+and the second attempt
+`0x93ca44d66263987af9f67805ea0dd9a3a53a4cb8a448f47404a6d26fac300c62`,
+were FINALIZED with GenVM SUCCESS **but consensus Undetermined (rotation 3)**.
+These are *not* accepted allocations. The user provided a `get_case` readback
+showing `sealed=true, matched=false, allocation_id=""`.
+
+The EP trace for Kitchen A, whose signed note explicitly said
+"After 17:00, one staff member can receive at most 6 crates.", gave
+`capacity=6, from=00:00`, an unsupported opening time. Kitchen B's
+"but only from 17:45 onwards" was interpreted as `capacity=0, from=17:45`
+at planned arrival 17:15. The different interpretations are a plausible
+source of validator disagreements; the exact validator votes are not
+provided, so this is not a proven unique root cause.
+
+The proposed source remediation is a **conservative bounded grammar**
+for clear English "after", "until" and "but only from ... onwards" intake
+notes with numeric crate caps. It requires the *whole note* to match,
+so it does not drop unknown caveats like "except today". Explicit windows
+and capacity become deterministic on that narrow path; all other
+receiving notes still use GenLayer nondeterministic LLM interpretation
+with independent validation. This trades AI calls on simple prose for
+consistent treatment of high-stakes temporal restrictions, and should
+be described as a hybrid matcher, not an all-LLM interpreter.
+
+**Important:** unit/direct-mode tests and local grammar coverage are NOT
+evidence that 5-validator GenLayer consensus will accept the newly
+versioned source. The deployed original matcher and its linked ledger
+remain unchanged. Redeploy and verify a NEW pair, and preserve existing
+PARTIAL/DISPUTED readbacks from the old pair.
