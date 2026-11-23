@@ -162,3 +162,66 @@ def test_offered_capacity_above_case_size_is_valid_and_allocation_is_capped(
     assert result["evaluations"][1]["feasible_crates"] == 16
     assert result["allocated_crates"] == 16
     assert result["unallocated_crates"] == 0
+
+
+def test_explicit_time_restrictions_take_precedence_over_mocked_ai(
+    direct_vm, direct_deploy, direct_alice, direct_bob, direct_charlie
+):
+    """Regression: 2026-11-23 late-B live consensus failed twice on clear times.
+
+    Both ordinary constrained-English intake notes are interpreted without
+    unreliable model-provided '00:00' opening for 'After 17:00'.
+    """
+    contract = direct_deploy("contracts/RescueMatcher.py")
+    from genlayer import Address
+    direct_vm.sender = direct_alice
+    contract.open_case(
+        "case-live-late", "Vegetable crates", 18, "16:40", "17:30",
+        Address(direct_bob).as_hex,
+    )
+    note_a = "After 17:00, one staff member can receive at most 6 crates."
+    note_b = "We can receive up to 18 crates, but only from 17:45 onwards."
+    direct_vm.sender = direct_charlie
+    contract.submit_offer("case-live-late", "Kitchen A", note_a, 18, "17:05", 2)
+    direct_vm.sender = Address("0x" + "d" * 40)
+    contract.submit_offer("case-live-late", "Kitchen B", note_b, 18, "17:15", 7)
+    direct_vm.sender = direct_alice
+    contract.seal_case("case-live-late")
+    # No LLM mock: unambiguous, fully recognized note grammar uses code.
+    contract.match_case("case-live-late")
+    data = json.loads(contract.get_allocation("case-live-late:a1"))
+    assert data["kitchen_id"] == "Kitchen A"
+    assert data["allocated_crates"] == 6
+    assert data["unallocated_crates"] == 12
+    assert data["evaluations"][0]["from"] == "17:00"
+    assert data["evaluations"][0]["capacity"] == 6
+    assert data["evaluations"][1]["from"] == "17:45"
+    assert data["evaluations"][1]["capacity"] == 0
+    assert data["evaluations"][1]["eligibility_reason"] == "OUTSIDE_RECEPTION_WINDOW"
+
+
+def test_extra_caveat_goes_through_ai_instead_of_fast_path(
+    direct_vm, direct_deploy, direct_alice, direct_bob, direct_charlie
+):
+    """An exception clause must not be ignored by the deterministic grammar."""
+    contract = direct_deploy("contracts/RescueMatcher.py")
+    from genlayer import Address
+    direct_vm.sender = direct_alice
+    contract.open_case("case-caveat", "Vegetables", 18, "16:40", "17:30",
+                       Address(direct_bob).as_hex)
+    note = "We can receive up to 18 crates until 17:30, except today."
+    direct_vm.sender = direct_charlie
+    contract.submit_offer("case-caveat", "Kitchen C", note, 18, "17:15", 7)
+    direct_vm.sender = direct_alice
+    contract.seal_case("case-caveat")
+    direct_vm.mock_llm(
+        r"(?s).*NOMINAL CAPACITY:.*NOTE:.*except today.*",
+        json.dumps({"capacity": 0, "from": "00:00", "until": "23:59",
+                    "evidence": note}),
+    )
+    direct_vm.mock_llm(r"(?s).*Independently judge.*", '{"valid":true}')
+    contract.match_case("case-caveat")
+    data = json.loads(contract.get_allocation("case-caveat:a1"))
+    assert data["allocated_crates"] == 0
+    assert data["unallocated_crates"] == 18
+    assert data["evaluations"][0]["capacity"] == 0
