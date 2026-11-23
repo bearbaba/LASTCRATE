@@ -43,6 +43,9 @@ class HandoffLedger(gl.Contract):
         return {
             "allocation_id": allocation_id, "matcher_address": self.matcher.as_hex,
             "case_id": allocation["case_id"], "kitchen_id": allocation["kitchen_id"],
+            "allocation_version": allocation["version"],
+            "driver_wallet": allocation["driver"],
+            "kitchen_wallet": allocation["kitchen_wallet"],
             "planned": allocation["allocated_crates"], "driver_report": None,
             "kitchen_report": None, "status": "PENDING",
             "received": None, "missing": None

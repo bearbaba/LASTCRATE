@@ -195,6 +195,8 @@ class RescueMatcher(gl.Contract):
         allocation_id = case_id + ":a1"
         allocation = {
             "allocation_id": allocation_id, "case_id": case_id,
+            "version": 1,
+            "selection_policy": "MAX_FEASIBLE_THEN_ETA_THEN_DISTANCE_THEN_KITCHEN_ID",
             "lot_label": rec["lot_label"], "total_crates": rec["crates"],
             "allocated_crates": count, "unallocated_crates": rec["crates"] - count,
             "deadline": rec["deadline"], "donor": rec["donor"], "driver": rec["driver"],
