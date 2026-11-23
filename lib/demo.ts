@@ -1,7 +1,7 @@
 /** Bounded local reviewer scenario; NOT a GenLayer AI consensus result. */
 export const SEED_A="After 17:00, one staff member can receive at most 6 crates.";
 export const SEED_B="We can receive up to 18 crates until 17:30.";
-export const LATE_B="We can only receive deliveries from 17:45 onwards.";
+export const LATE_B="We can receive up to 18 crates, but only from 17:45 onwards.";
 export type Offer={id:string;note:string;nominal:number;arrival:string;distanceKm:number};
 export type Evaluation=Offer&{capacity:number;from:string;until:string;eligible:boolean;feasible:number;evidence:string};
 export type Allocation={caseId:string;total:number;allocated:number;unallocated:number;selected:Evaluation|null;evaluations:Evaluation[];deadline:string};
