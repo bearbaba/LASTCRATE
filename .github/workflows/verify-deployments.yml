@@ -1,0 +1,27 @@
+name: Verify provided LASTCRATE Studionet contracts (read-only)
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/verify_deployments.py"
+      - ".github/workflows/verify-deployments.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify finalized GenLayer contract code (no wallet writes)
+        run: python scripts/verify_deployments.py
+      - name: Save audit result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lastcrate-deployment-audit
+          path: deployment-check.json
+          if-no-files-found: ignore
