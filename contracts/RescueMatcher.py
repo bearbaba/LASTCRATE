@@ -41,13 +41,16 @@ def interpret(note: str, nominal: int, quantity: int, arrival: int) -> dict:
         if not isinstance(value, dict):
             return False
         cap = value.get("capacity")
-        if type(cap) is not int or cap < 0 or cap > nominal:
+        if type(cap) is not int or cap < 0 or cap > min(nominal, quantity):
             return False
         evidence = value.get("evidence")
         if not isinstance(evidence, str) or not evidence.strip() or evidence not in note:
             return False
         try:
-            minutes(value.get("from", "")); minutes(value.get("until", ""))
+            opening = minutes(value.get("from", ""))
+            closing = minutes(value.get("until", ""))
+            if opening > closing:
+                return False  # Same-day intake windows only
         except Exception:
             return False
         return True
@@ -99,11 +102,14 @@ class RescueMatcher(gl.Contract):
             raise gl.vm.UserError("Invalid inventory")
         if minutes(pickup_at) >= minutes(deadline):
             raise gl.vm.UserError("Deadline must follow pickup time on same day")
+        driver = Address(driver_wallet).as_hex.lower()
+        if driver == "0x" + "0" * 40:
+            raise gl.vm.UserError("Driver wallet cannot be zero address")
         record = {
             "case_id": case_id, "lot_label": lot_label, "crates": crates,
             "pickup_at": pickup_at, "deadline": deadline,
             "donor": gl.message.sender_address.as_hex.lower(),
-            "driver": Address(driver_wallet).as_hex.lower(),
+            "driver": driver,
             "sealed": False, "matched": False, "offers": [],
             "allocation_id": ""
         }
@@ -123,13 +129,18 @@ class RescueMatcher(gl.Contract):
         if distance_km < 0 or distance_km > 100000:
             raise gl.vm.UserError("Invalid distance in whole km")
         minutes(arrival_at)
+        signer = gl.message.sender_address.as_hex.lower()
+        if signer == rec["driver"] or signer == rec["donor"]:
+            raise gl.vm.UserError("Kitchen signer must be independent from donor and driver")
+        if any(o["kitchen_wallet"] == signer for o in rec["offers"]):
+            raise gl.vm.UserError("One wallet may submit only one kitchen offer per case")
         if any(o["kitchen_id"] == kitchen_id for o in rec["offers"]):
             raise gl.vm.UserError("Kitchen already registered in this case")
         if len(rec["offers"]) >= 10:
             raise gl.vm.UserError("At most ten receiving offers per case")
         rec["offers"].append({
             "kitchen_id": kitchen_id,
-            "kitchen_wallet": gl.message.sender_address.as_hex.lower(),
+            "kitchen_wallet": signer,
             "note": intake_note, "nominal_capacity": nominal_capacity,
             "arrival_at": arrival_at, "distance_km": distance_km
         })
@@ -162,12 +173,16 @@ class RescueMatcher(gl.Contract):
             end = minutes(interpreted["until"])
             feasible = (pickup <= arrival <= deadline and start <= arrival <= end)
             qty = min(rec["crates"], interpreted["capacity"]) if feasible else 0
+            reason = ("OUTSIDE_DONATION_WINDOW" if not pickup <= arrival <= deadline
+                      else "OUTSIDE_RECEPTION_WINDOW" if not start <= arrival <= end
+                      else "NO_CAPACITY" if qty == 0 else "ELIGIBLE")
             evaluations.append({
                 "kitchen_id": o["kitchen_id"], "kitchen_wallet": o["kitchen_wallet"],
                 "arrival_at": o["arrival_at"], "distance_km": o["distance_km"],
                 "capacity": interpreted["capacity"], "from": interpreted["from"],
                 "until": interpreted["until"], "evidence": interpreted["evidence"],
-                "feasible_crates": qty, "eligible": feasible and qty > 0
+                "feasible_crates": qty, "eligible": feasible and qty > 0,
+                "eligibility_reason": reason
             })
         # Deterministic largest feasible quantity; tiebreak by ETA, km, kitchen ID.
         ordered = sorted(
@@ -180,6 +195,8 @@ class RescueMatcher(gl.Contract):
         allocation_id = case_id + ":a1"
         allocation = {
             "allocation_id": allocation_id, "case_id": case_id,
+            "version": 1,
+            "selection_policy": "MAX_FEASIBLE_THEN_ETA_THEN_DISTANCE_THEN_KITCHEN_ID",
             "lot_label": rec["lot_label"], "total_crates": rec["crates"],
             "allocated_crates": count, "unallocated_crates": rec["crates"] - count,
             "deadline": rec["deadline"], "donor": rec["donor"], "driver": rec["driver"],
