@@ -25,7 +25,7 @@ export default function Home(){
  async function write(to:"matcher"|"ledger",method:string,args:(string|number)[]){
   setBusy(method);setFeedback("");
   try{const hash=await signWrite(to==="matcher"?matcher:ledger,method,args);setFeedback("FINALIZED · CONSENSUS ACCEPTED · EXECUTION SUCCESS / "+method+" / "+hash);}
-  catch(e){setFeedback("NOT FINALIZED / "+(e instanceof Error?e.message:String(e)));}finally{setBusy("");}
+  catch(e){setFeedback("TRANSACTION NOT VERIFIED / "+(e instanceof Error?e.message:String(e))+" · Inspect Explorer; do not blindly retry.");}finally{setBusy("");}
  }
  async function read(to:"matcher"|"ledger",method:string,args:(string|number)[]){
   setBusy(method);setFeedback("");setOutput("");
