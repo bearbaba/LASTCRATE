@@ -68,8 +68,8 @@ def test_consensus_with_mocked_receiving_limits(direct_vm, direct_deploy, direct
 
 
 def test_two_kitchens_conservative_selection(direct_vm, direct_deploy, direct_alice, direct_bob, direct_charlie):
-    from genlayer import Address
     contract = direct_deploy("contracts/RescueMatcher.py")
+    from genlayer import Address
     direct_vm.sender = direct_alice
     contract.open_case("case-two", "vegetable crates", 18, "16:40", "17:30", Address(direct_bob).as_hex)
     note_a = "After 17:00, one staff member can receive at most 6 crates."
