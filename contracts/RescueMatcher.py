@@ -25,11 +25,11 @@ def explicit_receiving_limit(note: str, nominal: int, arrival: int):
     to GenLayer AI interpretation instead of being silently ignored.
     """
     pattern = (
-        r"(?:after (?P<after>\\d\\d:\\d\\d), )?"
+        r"(?:after (?P<after>\d\d:\d\d), )?"
         r"(?:(?:one staff member|we) can )?"
-        r"receive (?:at most|up to) (?P<limit>\\d+) crates"
-        r"(?: until (?P<until>\\d\\d:\\d\\d))?"
-        r"(?:, but only from (?P<only_from>\\d\\d:\\d\\d) onwards)?\\."
+        r"receive (?:at most|up to) (?P<limit>\d+) crates"
+        r"(?: until (?P<until>\d\d:\d\d))?"
+        r"(?:, but only from (?P<only_from>\d\d:\d\d) onwards)?\."
     )
     match = re.fullmatch(pattern, note.strip().lower())
     if match is None:
