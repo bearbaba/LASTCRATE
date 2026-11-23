@@ -5,7 +5,7 @@
   "lot": "18 crates of vegetables",
   "offer_a": "After 17:00, one staff member can receive at most 6 crates.",
   "offer_b": "We can receive up to 18 crates until 17:30.",
-  "alternative_offer_b": "We can only receive deliveries from 17:45 onwards.",
+  "alternative_offer_b": "We can receive up to 18 crates, but only from 17:45 onwards.",
   "expected_original": {
     "kitchen": "Kitchen B",
     "allocated": 18,
