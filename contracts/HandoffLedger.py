@@ -30,6 +30,10 @@ class HandoffLedger(gl.Contract):
         allocation = json.loads(raw)
         if allocation["allocated_crates"] <= 0 or not allocation["kitchen_wallet"]:
             raise gl.vm.UserError("No receiving kitchen was allocated")
+        if allocation["allocated_crates"] > allocation["total_crates"]:
+            raise gl.vm.UserError("Invalid matcher allocation quantity")
+        if allocation["driver"] == allocation["kitchen_wallet"]:
+            raise gl.vm.UserError("Driver and receiver must be distinct signers")
         return allocation
 
     def _record(self, allocation_id: str, allocation: dict) -> dict:
