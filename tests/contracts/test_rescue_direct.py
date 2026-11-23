@@ -172,8 +172,8 @@ def test_explicit_time_restrictions_take_precedence_over_mocked_ai(
     Both ordinary constrained-English intake notes are interpreted without
     unreliable model-provided '00:00' opening for 'After 17:00'.
     """
-    from genlayer import Address
     contract = direct_deploy("contracts/RescueMatcher.py")
+    from genlayer import Address
     direct_vm.sender = direct_alice
     contract.open_case(
         "case-live-late", "Vegetable crates", 18, "16:40", "17:30",
@@ -204,8 +204,8 @@ def test_extra_caveat_goes_through_ai_instead_of_fast_path(
     direct_vm, direct_deploy, direct_alice, direct_bob, direct_charlie
 ):
     """An exception clause must not be ignored by the deterministic grammar."""
-    from genlayer import Address
     contract = direct_deploy("contracts/RescueMatcher.py")
+    from genlayer import Address
     direct_vm.sender = direct_alice
     contract.open_case("case-caveat", "Vegetables", 18, "16:40", "17:30",
                        Address(direct_bob).as_hex)
