@@ -6,9 +6,8 @@ It checks wallet roles, validation, evidence and immutable status transitions.
 import json
 
 def test_independent_receiver_cannot_be_driver(direct_vm, direct_deploy, direct_alice, direct_bob):
-    from genlayer import Address
-    # Import Address after deploy; the fixture installs GenVM SDK on sys.path.
     contract = direct_deploy("contracts/RescueMatcher.py")
+    from genlayer import Address  # SDK added by direct-mode deployment fixture
     direct_vm.sender = direct_alice
     contract.open_case("case-a", "18 vegetable crates", 18, "16:40", "17:30", Address(direct_bob).as_hex)
     direct_vm.sender = direct_bob
@@ -17,8 +16,8 @@ def test_independent_receiver_cannot_be_driver(direct_vm, direct_deploy, direct_
 
 
 def test_donor_cannot_create_duplicate_case(direct_vm, direct_deploy, direct_alice, direct_bob):
-    from genlayer import Address
     contract = direct_deploy("contracts/RescueMatcher.py")
+    from genlayer import Address
     direct_vm.sender = direct_alice
     args = ("rescue-001", "vegetable crates", 18, "16:40", "17:30", Address(direct_bob).as_hex)
     contract.open_case(*args)
@@ -27,8 +26,8 @@ def test_donor_cannot_create_duplicate_case(direct_vm, direct_deploy, direct_ali
 
 
 def test_no_mutation_after_seal(direct_vm, direct_deploy, direct_alice, direct_bob, direct_charlie):
-    from genlayer import Address
     contract = direct_deploy("contracts/RescueMatcher.py")
+    from genlayer import Address
     direct_vm.sender = direct_alice
     contract.open_case("case-sealed", "vegetables", 18, "16:40", "17:30", Address(direct_bob).as_hex)
     direct_vm.sender = direct_charlie
@@ -42,8 +41,8 @@ def test_no_mutation_after_seal(direct_vm, direct_deploy, direct_alice, direct_b
 
 
 def test_consensus_with_mocked_receiving_limits(direct_vm, direct_deploy, direct_alice, direct_bob, direct_charlie):
-    from genlayer import Address
     contract = direct_deploy("contracts/RescueMatcher.py")
+    from genlayer import Address
     direct_vm.sender = direct_alice
     contract.open_case("case-match", "vegetables", 18, "16:40", "17:30", Address(direct_bob).as_hex)
     note = "After 17:00, one staff member can receive at most 6 crates."
