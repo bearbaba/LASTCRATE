@@ -51,6 +51,16 @@ Additional separately tested reconciliations: **PARTIAL** (both report 16 of a p
 3. Select **Live GenLayer** to open a **new**, unique donation case and submit signer-bound writes: donor opens, each kitchen signs its offer, donor seals and matches, then driver and chosen kitchen separately attest their actual declared quantities. Read the resulting allocation and handoff.
 4. Do **not** resubmit writes for the documented completed allocation. The UI disables writes when the recorded case ID is selected.
 
+## Connect Wallet and sign a rescue case
+
+1. Open the live site and click **Connect Wallet** in the header or in **Live GenLayer**.
+2. Approve the browser wallet connection and select **GenLayer Studionet (chain 61999)**.
+3. Create a unique case ID, select your wallet role, and submit only the transaction permitted for your account. The donor opens and seals; each kitchen signs its own offer; the selected kitchen and driver sign separate quantity reports.
+4. After each transaction, verify **FINALIZED + Accepted consensus + successful GenVM execution**. Public allocation and handoff reads do not require wallet access.
+5. Account or network changes are reflected in the connection status. The contract enforces signer permissions.
+
+Wallet connection does not submit a transaction or require private keys. Any wallet approval must be initiated and confirmed by the user.
+
 ## Trust boundaries
 
 - Source notes, ETA, distance, driver counts and kitchen counts are **claims supplied by participants**. No GPS, sensors, scale readings, or proof of food quality is included.
