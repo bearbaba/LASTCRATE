@@ -44,7 +44,9 @@ def interpret(note: str, nominal: int, quantity: int, arrival: int) -> dict:
         if not isinstance(value, dict):
             return False
         cap = value.get("capacity")
-        # Kitchen capacity is independent of this donation\'s lot size.\n        # match_case clamps the eventual allocation to rec["crates"].\n        if type(cap) is not int or cap < 0 or cap > nominal:
+        # Kitchen capacity is independent of this donation's lot size.
+        # match_case clamps the eventual allocation to rec["crates"].
+        if type(cap) is not int or cap < 0 or cap > nominal:
             return False
         evidence = value.get("evidence")
         if not isinstance(evidence, str) or not evidence.strip() or evidence not in note:
