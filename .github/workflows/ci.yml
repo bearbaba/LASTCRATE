@@ -30,5 +30,12 @@ jobs:
         run: |
           genvm-lint lint contracts/RescueMatcher.py
           genvm-lint lint contracts/HandoffLedger.py
+      - name: Validate against pinned GenVM SDK and prepare direct-mode cache
+        run: |
+          genvm-lint check contracts/RescueMatcher.py
+          genvm-lint check contracts/HandoffLedger.py
+          mkdir -p "$HOME/.cache/gltest-direct"
+          find "$HOME/.cache/genvm-linter" -name 'genvm-universal-*.tar.xz' -type f -exec cp -n {} "$HOME/.cache/gltest-direct/" \;
+          ls -lh "$HOME/.cache/gltest-direct"
       - name: GenLayer SDK direct-mode tests (mocked LLM, no RPC)
         run: pytest -q tests/contracts/
