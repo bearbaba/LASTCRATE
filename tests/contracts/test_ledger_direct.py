@@ -22,7 +22,7 @@ def setup_ledger(direct_vm, direct_deploy, direct_alice, direct_bob, monkeypatch
         "total_crates": 18,
     }
     # Real contract method logic, only the external chain read is stubbed.
-    monkeypatch.setattr(type(contract), "_allocation",
+    monkeypatch.setattr(type(contract._instance), "_allocation",
                         lambda self, allocation_id: allocation
                         if allocation_id == ALLOCATION_ID else None)
     return contract
