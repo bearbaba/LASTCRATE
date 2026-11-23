@@ -1,0 +1,31 @@
+{
+  "case_id": "rescue-01",
+  "pickup": "16:40",
+  "deadline": "17:30",
+  "lot": "18 crates of vegetables",
+  "offer_a": "After 17:00, one staff member can receive at most 6 crates.",
+  "offer_b": "We can receive up to 18 crates until 17:30.",
+  "alternative_offer_b": "We can only receive deliveries from 17:45 onwards.",
+  "expected_original": {
+    "kitchen": "Kitchen B",
+    "allocated": 18,
+    "unallocated": 0
+  },
+  "expected_alternative": {
+    "kitchen": "Kitchen A",
+    "allocated": 6,
+    "unallocated": 12
+  },
+  "handoff_partial": {
+    "driver": 16,
+    "kitchen": 16,
+    "status": "PARTIAL",
+    "received": 16,
+    "missing": 2
+  },
+  "handoff_dispute": {
+    "driver": 18,
+    "kitchen": 16,
+    "status": "DISPUTED"
+  }
+}
