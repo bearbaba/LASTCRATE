@@ -3,6 +3,16 @@ import {createClient} from "genlayer-js";
 import {ExecutionResult,TransactionStatus} from "genlayer-js/types";
 import {studionet} from "genlayer-js/chains";
 type Provider={request:(args:{method:string;params?:unknown[]})=>Promise<unknown>};
+type CommittedReceipt={result?:number|string;resultName?:string;txExecutionResultName?:string;statusName?:string};
+/** A FINALIZED transaction can still have Undetermined consensus. Fail closed. */
+export function assertAcceptedExecution(tx:CommittedReceipt):void{
+ const consensusName=String(tx.resultName||"").replace(/[^a-z]/gi,"").toLowerCase();
+ const agreed=tx.result===1||consensusName==="majorityagree";
+ if(!agreed)throw Error("Consensus was not Accepted: "+(tx.resultName||tx.result||"unknown"));
+ const execution=String(tx.txExecutionResultName||"").replace(/[^a-z]/gi,"").toLowerCase();
+ if(execution!=="finishedwithreturn"&&tx.txExecutionResultName!==ExecutionResult.FINISHED_WITH_RETURN)
+  throw Error("GenVM execution was not successful: "+(tx.txExecutionResultName||"unknown"));
+}
 function address(value:string){if(!/^0x[0-9a-fA-F]{40}$/.test(value))throw Error("Deployed 0x contract address required.");return value;}
 export async function signWrite(target:string,method:string,args:(string|number)[]){
  if(typeof window==="undefined")throw Error("Browser wallet required.");
@@ -14,7 +24,8 @@ export async function signWrite(target:string,method:string,args:(string|number)
  await client.connect("studionet");
  const hash=await client.writeContract({address:address(target) as never,functionName:method,args,value:BigInt(0)});
  const tx=await client.waitForTransactionReceipt({hash,status:TransactionStatus.FINALIZED});
- if(tx.txExecutionResultName!==ExecutionResult.FINISHED_WITH_RETURN)throw Error("Finalized with execution error: "+tx.txExecutionResultName);
+ try{assertAcceptedExecution(tx as CommittedReceipt);}
+ catch(error){throw Error("Submitted transaction "+hash+" not verified: "+(error instanceof Error?error.message:String(error)));}
  return hash;
 }
 export async function publicRead(target:string,method:string,args:(string|number)[]){
