@@ -51,15 +51,15 @@ Additional separately tested reconciliations: **PARTIAL** (both report 16 of a p
 3. Select **Live GenLayer** to open a **new**, unique donation case and submit signer-bound writes: donor opens, each kitchen signs its offer, donor seals and matches, then driver and chosen kitchen separately attest their actual declared quantities. Read the resulting allocation and handoff.
 4. Do **not** resubmit writes for the documented completed allocation. The UI disables writes when the recorded case ID is selected.
 
-## Connect Wallet for the signed video walkthrough
+## Connect Wallet and sign a rescue case
 
-1. Open the live site and click **Connect Wallet** in the top-right header or on **Live GenLayer**.
-2. Approve the browser wallet connection; GenLayerJS requests **Studionet (chain 61999)** if needed. The header shows the connected address and network.
-3. Click **Prepare signing-video demo**. The app fills the dedicated video case, Kitchen A/B intake windows and the 6/6 handoff quantities. Connection alone never signs a transaction.
-4. Choose the correct account in your wallet extension **before** each step, then use **Refresh / Switch Wallet** if necessary. Buttons for the recorded demo enable only for the corresponding authorized signer: Donor/Driver, Kitchen A, or Kitchen B.
-5. Sign a transaction only after reviewing its action and parameters. Wait for FINALIZED + accepted consensus + successful GenVM execution before proceeding. Switch to read-only contract verification after matching and final receipt.
+1. Open the live site and click **Connect Wallet** in the header or in **Live GenLayer**.
+2. Approve the browser wallet connection and select **GenLayer Studionet (chain 61999)**.
+3. Create a unique case ID, select your wallet role, and submit only the transaction permitted for your account. The donor opens and seals; each kitchen signs its own offer; the selected kitchen and driver sign separate quantity reports.
+4. After each transaction, verify **FINALIZED + Accepted consensus + successful GenVM execution**. Public allocation and handoff reads do not require wallet access.
+5. Account or network changes are reflected in the connection status. The contract enforces signer permissions.
 
-The on-screen **Connect Wallet** button is a browser-wallet (EIP-1193) integration. It does not create a wallet, ask for private keys, sign on your behalf, or claim to have tested a real user's extension until they actually connect.
+Wallet connection does not submit a transaction or require private keys. Any wallet approval must be initiated and confirmed by the user.
 
 ## Trust boundaries
 
