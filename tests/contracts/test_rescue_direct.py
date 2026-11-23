@@ -118,3 +118,47 @@ def test_b_late_leaves_twelve_unallocated(direct_vm, direct_deploy, direct_alice
     assert data["allocated_crates"] == 6
     assert data["unallocated_crates"] == 12
     assert data["evaluations"][1]["eligibility_reason"] == "OUTSIDE_RECEPTION_WINDOW"
+
+
+def test_offered_capacity_above_case_size_is_valid_and_allocation_is_capped(
+    direct_vm, direct_deploy, direct_alice, direct_bob, direct_charlie
+):
+    """16 crates in inventory vs Kitchen B's legitimate ability to accept 18.
+
+    Regression for Studionet match_case Rollback on 2026-11-23:
+    AI can interpret the kitchen's capability as 18, while allocation must be <=16.
+    """
+    contract = direct_deploy("contracts/RescueMatcher.py")
+    from genlayer import Address
+
+    direct_vm.sender = direct_alice
+    contract.open_case(
+        "case-16-dispute", "Vegetable crates", 16, "16:40", "17:30",
+        Address(direct_bob).as_hex,
+    )
+    note_a = "After 17:00, one staff member can receive at most 6 crates."
+    note_b = "We can receive up to 18 crates until 17:30."
+    direct_vm.sender = direct_charlie
+    contract.submit_offer("case-16-dispute", "Kitchen A", note_a, 18, "17:05", 2)
+    direct_vm.sender = Address("0x" + "d" * 40)
+    contract.submit_offer("case-16-dispute", "Kitchen B", note_b, 18, "17:15", 7)
+    direct_vm.sender = direct_alice
+    contract.seal_case("case-16-dispute")
+
+    direct_vm.mock_llm(
+        r"(?s).*NOMINAL CAPACITY:.*NOTE:.*After 17:00.*",
+        json.dumps({"capacity": 6, "from": "17:00", "until": "23:59", "evidence": note_a}),
+    )
+    direct_vm.mock_llm(
+        r"(?s).*NOMINAL CAPACITY:.*NOTE:.*up to 18 crates until 17:30.*",
+        json.dumps({"capacity": 18, "from": "00:00", "until": "17:30", "evidence": note_b}),
+    )
+    direct_vm.mock_llm(r"(?s).*Independently judge.*", '{"valid":true}')
+
+    contract.match_case("case-16-dispute")
+    result = json.loads(contract.get_allocation("case-16-dispute:a1"))
+    assert result["kitchen_id"] == "Kitchen B"
+    assert result["evaluations"][1]["capacity"] == 18
+    assert result["evaluations"][1]["feasible_crates"] == 16
+    assert result["allocated_crates"] == 16
+    assert result["unallocated_crates"] == 0

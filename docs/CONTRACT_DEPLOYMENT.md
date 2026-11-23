@@ -47,3 +47,13 @@ The second command must use the address printed from a finalized successful firs
 * Arrival and distance are declared by kitchens, not independently measured. The time is same-day HH:MM.
 * HandoffLedger stores statements by two wallets; it cannot independently establish physical transfer, quality or safety.
 * This repo does not claim finalization or contract addresses until real explorer readbacks exist.
+
+## Studionet incident 2026-11-23: 16-crate case and AI interpretation rollback
+
+Transaction `0x7d0aa0ec736dffd87162f3c6c721bccfaecff1feac1a71f2df3884cbc87ce215` finalized **with GenVM ERROR**, consensus **Undetermined**, `Unsupported kitchen interpretation`, rotation 3. Finality is not execution success.
+
+The existing RescueMatcher source rejected any interpreter capacity greater than `min(nominal_capacity, lot_crates)`. For a 16-crate lot and a kitchen that explicitly accepts 18, an otherwise valid AI interpretation `capacity=18` therefore fails validation. The actual rejected candidate is not fully revealed in the user-supplied EP outputs, so this is a plausible source-level failure mechanism, not proven as that exact transaction's only cause. Another shown candidate had a reception start of 00:00 despite a note saying 'After 17:00', indicating additional semantic disagreement.
+
+Fix: interpret **intake capability** independent of lot quantity (still capped by the signed kitchen's nominal capacity), then deterministically cap actual allocation by lot quantity. Added direct-mode regression test covering 16 in inventory and 18 receivable, expected 16 allocated.
+
+**Deployment warning:** editing GitHub source does NOT change the existing deployed contract at `0xb26b2C9b2aa91D275055B32b861D5276dC3D0347`. To deploy patched code, create a NEW RescueMatcher and a NEW HandoffLedger whose constructor is the new matcher address. The earlier successful 18→16 PARTIAL proof remains at the original pair. A failed `match_case` rollback does not create a new allocation. Re-running on the old contract may behave differently due to LLM nondeterminism, but may fail again and consume more test GEN.
