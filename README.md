@@ -1,56 +1,79 @@
-# LASTCRATE — Match the rescue, reconcile the crates
+# LASTCRATE — Rescue the food. Account for every crate.
 
-**One-liner:** LASTCRATE matches time-sensitive food donations with kitchens that can receive them, then verifies what actually changed hands.
+LASTCRATE coordinates a time-sensitive donation with receiving kitchens, interprets explicit intake limits through a GenLayer Intelligent Contract, and reconciles two **wallet-signed quantity declarations**. It does not claim that blockchain data or AI independently proves physical food delivery.
 
-## Exactly two GenLayer Intelligent Contracts
+**Live application:** https://lastcrate.vercel.app/  
+**GenLayer network:** Studionet (test network)  
+**Evidence log:** https://github.com/bearbaba/LASTCRATE/issues/1
 
-1. **contracts/RescueMatcher.py** — Donor opens and seals a bounded food donation case. Each kitchen account submits a natural-language reception note with its own signature. GenLayer interprets time/capacity constraints, checks exact source quotations and obtains independent validator assessment. After interpretations, deterministic code selects the kitchen that can receive **the most crates before the deadline**. Tie breakers: earliest ETA, shortest declared distance, kitchen ID. Unallocated crates stay explicit. Allocation record is readable by ID.
-2. **contracts/HandoffLedger.py** — Reads the allocation **directly** from RescueMatcher. Only the linked driver and selected kitchen wallets may confirm their respective quantities, each only once. COMPLETE = both agree on full quantity; PARTIAL = both agree on lower quantity; DISPUTED = differing claims; PENDING until both confirmations.
+## Deployed intelligent contracts
 
-The ledger establishes what parties said, **not that physical delivery was independently observed**.
+These are the two **active** contracts used by the public app. There is only one LASTCRATE product; historical redeployments are not separate product editions.
 
-## Steward scenario (3-minute walkthrough)
+| Contract | Role | Active Studionet address |
+|---|---|---|
+| [RescueMatcher](contracts/RescueMatcher.py) | Seals donation cases, interprets each signed receiving note, allocates feasible quantity by a deterministic tie-breaking rule | `0xc38Ed838F7d35f7F1f9a5888de5900D47f940Af2` |
+| [HandoffLedger](contracts/HandoffLedger.py) | Reads a matching allocation and reconciles one driver declaration and one chosen-kitchen declaration | `0x77C85f398afE09debc331C249E0373109c279F83` |
 
-In **Review scenario**:
+The ledger's public `get_handoff` readback reports `matcher_address=0xc38Ed838F7d35f7F1f9a5888de5900D47f940Af2`, demonstrating the deployed cross-contract pairing. Source-to-deployment equivalence has not been independently audited; successful test scenarios are not a third-party security audit.
 
-1. Start with 18 vegetable crates available at 16:40, deadline 17:30.
-2. Kitchen A (closer) says "After 17:00, one staff member can receive at most 6 crates." Kitchen B (farther) says "We can receive up to 18 crates until 17:30."
-3. Inspect Kitchen B selected for 18 crates, with A's 6-crate limit highlighted as source evidence.
-4. Click **Move B to 17:45**. Its advertised 18-crate capacity stays constant; only the reception start window changes. Kitchen B becomes ineligible, A receives 6 and **12 crates remain UNALLOCATED**.
-5. Restore the seed case. Enter driver 16, kitchen 16: PARTIAL, 16 received and 2 missing. Enter driver 18, kitchen 16: DISPUTED with two distinct quantities; no fabricated agreed delivery count.
-6. Change kitchen note directly and inspect the bounded local preview.
+## Verified Studionet case: 18 offered → 6 assigned → COMPLETE
 
-The preview is a **non-consensus test fixture**. On-chain source interpretation is performed inside RescueMatcher and needs real GenLayer transactions.
+This was observed with real wallet-signed transactions and recorded Studio public reads on **November 23, 2026**. The immutable test identifier includes an internal development suffix; it is not a LASTCRATE product version.
 
-## Actual GenLayer review
+- `case_id`: `lastcrate-231126-v2-lateb`
+- `allocation_id`: `lastcrate-231126-v2-lateb:a1`
+- Donation: 18 vegetable crates; pickup 16:40; deadline 17:30.
+- Kitchen A: "After 17:00, one staff member can receive at most 6 crates." ETA 17:05; reported distance 2 km. **Eligible; capacity 6.**
+- Kitchen B: "We can receive up to 18 crates, but only from 17:45 onwards." ETA 17:15; reported distance 7 km. **Not eligible**: `OUTSIDE_RECEPTION_WINDOW`; feasible capacity 0.
+- `get_allocation` recorded `kitchen_id=Kitchen A`, `allocated_crates=6`, `unallocated_crates=12`.
+- Driver wallet reported 6; selected Kitchen A wallet reported 6, independently.
+- `get_handoff` recorded `status=COMPLETE`, `planned=6`, `received=6`, `missing=0`, and the correct RescueMatcher address.
 
-**No live GenLayer addresses or successful transactions have been verified yet.**
+All seven write transaction reports were **FINALIZED / Consensus Accepted / GenVM SUCCESS**:
 
-1. Deploy RescueMatcher (no constructor arguments), then HandoffLedger with actual RescueMatcher address as constructor argument.
-2. Configure **NEXT_PUBLIC_RESCUE_MATCHER_ADDRESS** and **NEXT_PUBLIC_HANDOFF_LEDGER_ADDRESS** in Vercel or local environment.
-3. Donor wallet calls **open_case** with case ID, item name, quantity, pickup, deadline and driver wallet. Each kitchen switches to its own wallet and calls **submit_offer**. Donor calls **seal_case** and **match_case**.
-4. Publicly read **get_allocation(case_id:a1)**. Inspect every offer, exact quote, parsed reception window, capacity, selected wallet and unallocated quantity.
-5. Switch to driver wallet to call **confirm_dispatch**. Switch to the selected kitchen wallet to call **confirm_receipt**. Read **get_handoff** and check PARTIAL or DISPUTED.
-6. Every write must reach **FINALIZED and successful execution** before it becomes evidence. Create a new case ID for the alternative 17:45 experiment; a sealed case cannot be edited.
+| Step | Transaction |
+|---|---|
+| Donor opens donation | [open_case](https://explorer-studio.genlayer.com/tx/0x7cb21dafd14436ad7e6aad5c88979b867bb50f5dc0ff3c841589e153f4138add) |
+| Kitchen A submits offer | [submit_offer A](https://explorer-studio.genlayer.com/tx/0x775b1a9a24006e614acd3b78b129372079418e2e6c992f52405cf8c79a0b9409) |
+| Kitchen B submits offer | [submit_offer B](https://explorer-studio.genlayer.com/tx/0x9dcfa95c756df61b0e8e94b0130fd836ac2b0cab12c94bae2cfcc7dab8b9682b) |
+| Donor seals case | [seal_case](https://explorer-studio.genlayer.com/tx/0x720e311ac40d885ca612a974d2abc27f52b595d377c96910060a6b01db8acdd7) |
+| Donor performs allocation | [match_case](https://explorer-studio.genlayer.com/tx/0x17391ac1c95059be9968ab333b7317b7fd1929be4f47b8dfb82ea59560d28f11) |
+| Driver signs report | [confirm_dispatch](https://explorer-studio.genlayer.com/tx/0xa4154e1f104d5bae1d3c52f47e38e2f0e79ad4e64ab7e011f9801558b6414431) |
+| Kitchen A signs report | [confirm_receipt](https://explorer-studio.genlayer.com/tx/0x5cc8c8dff97fcecb657969275a2475e54b825c7d89642656d9a00d744b9bb603) |
 
-## Local development
+Additional separately tested reconciliations: **PARTIAL** (both report 16 of a planned 18, missing 2) and **DISPUTED** (driver 18 versus kitchen 16, with no invented agreed receipt). Historical test evidence is preserved in [Issue #1](https://github.com/bearbaba/LASTCRATE/issues/1).
 
-Node 22+ recommended: **npm install**, **npm run dev**, **npm run test**, **npm run typecheck**, **npm run build**.
+## Review in three minutes
 
-- **app/page.tsx** compact donation and handoff lab, plus wallet-signed on-chain workflow.
-- **lib/demo.ts** bounded deterministic preview; **lib/genlayer.ts** stable GenLayerJS wallet client.
-- **fixtures/review.json** editable scenario and expected results.
-- **tests/demo.test.ts** exercises quantity maximize, cutoff, missing crates, disputes and invalid receipts.
-- **.github/workflows/ci.yml** checks tests, TypeScript, Next.js build and Python syntax.
+1. Open https://lastcrate.vercel.app/. The opening **On-chain evidence** section documents the completed signed test. Select **Read allocation** and **Read handoff** for fresh, read-only queries to the active contracts. Network access is required; no wallet signature is needed.
+2. Select **Review scenario** for the explicitly labeled *local preview*. Kitchen B initially receives 18 despite Kitchen A being closer. Click **Move B to 17:45**; Kitchen B becomes ineligible and Kitchen A receives only 6, leaving 12 unallocated. Local preview is not consensus evidence.
+3. Select **Live GenLayer** to open a **new**, unique donation case and submit signer-bound writes: donor opens, each kitchen signs its offer, donor seals and matches, then driver and chosen kitchen separately attest their actual declared quantities. Read the resulting allocation and handoff.
+4. Do **not** resubmit writes for the documented completed allocation. The UI disables writes when the recorded case ID is selected.
 
-No hosted backend, API keys, paid AI model or custody required for reviewer preview. Live GenLayer calls may require test GEN and compatible network support.
+## Trust boundaries
 
-## Limitations and honest claims
+- Source notes, ETA, distance, driver counts and kitchen counts are **claims supplied by participants**. No GPS, sensors, scale readings, or proof of food quality is included.
+- A `FINALIZED` transaction with GenVM `SUCCESS` may still have **Undetermined** consensus. The frontend requires **majority agreement and successful execution** before reporting verified write completion. If a transaction fails verification after a hash was issued, inspect its Explorer record; do not blindly retry.
+- `COMPLETE` means both signer-bound quantity reports equal the planned allocation. `PARTIAL` means both reports agree on fewer crates. `DISPUTED` means they differ; neither side's number is silently accepted as ground truth.
+- The contract accepts up to 10 kitchens per same-day donation case. Explicit, bounded receiving grammar has deterministic safe handling; other supported notes use GenLayer nondeterministic evaluation with validator equivalence. Interpretation remains fallible.
+- The website is hosted on Vercel, the contracts are on **Studionet**, not a public mainnet release. No paid AI service or hosted database is needed for the local preview. Real GenLayer test writes may require test GEN.
 
-- Distance and arrival are caller-submitted declarations, not map-verified routes or measured travel.
-- Data is bounded to same-day handoffs, integer crates and up to 10 receiving offers.
-- No temperature, safety, legal, refrigeration or quality certification is performed.
-- Intake interpretations are independently checked via GenLayer validator logic but still subject to model and consensus errors; production use requires adversarial E2E testing.
-- **Unverified:** deployed contracts, cross-contract GenVM execution, finalization receipts and real delivery measurements. Never claim source code or local fixture tests prove these.
+## Development and CI
 
-Official GenLayer documentation: https://docs.genlayer.com/developers/intelligent-contracts/examples/snippets
+```bash
+npm install --no-audit --no-fund
+npm run test
+npm run typecheck
+npm run build
+```
+
+Node.js 22+ recommended. Python CI compiles both contracts, runs GenVM lint/check and GenLayer SDK direct-mode tests (mock LLM/validator fixtures). Direct-mode tests do not prove live consensus. Frontend regression tests check the bounded preview, signer receipt reconciliation, and documented proof integrity.
+
+- `app/page.tsx` — proof-first UI, local scenario and GenLayer wallet-signed actions.
+- `lib/evidence.ts` — immutable, explicitly dated Studio evidence plus Explorer links and readback formatting.
+- `lib/genlayer.ts` — Studionet client, read-only calls, and **consensus-aware** transaction validation.
+- `lib/demo.ts` — deterministic local preview; never presented as a live contract result.
+- `contracts/` — the two deployed Intelligent Contracts.
+
+Official documentation: https://docs.genlayer.com/developers/decentralized-applications/writing-data
