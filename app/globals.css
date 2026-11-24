@@ -228,3 +228,15 @@
 @media(max-width:1050px){.lcLayout{grid-template-columns:minmax(0,1.15fr) minmax(290px,.85fr)}.lcWorkPanel{padding:16px}.lcStats>div{min-width:62px;padding:8px}}
 @media(max-width:820px){.lcApp{height:auto;min-height:100dvh;overflow:visible}.lcLayout{grid-template-columns:1fr;overflow:visible}.lcWorkPanel,.lcMonitor{overflow:visible}.lcIntro{align-items:flex-start}.lcStages button{padding:9px 7px}.lcFooter{min-height:38px}}
 @media(max-width:540px){.lcApp{padding:0 13px}.lcHeader{height:60px;flex-basis:60px}.lcBrand strong{font-size:12px}.lcBrand small{font-size:7px}.lcMark{width:31px;height:31px;font-size:18px}.lcNetwork{display:none}.lcIntro{padding:15px 0;gap:10px;flex-direction:column}.lcStats{width:100%;gap:5px}.lcStats>div{flex:1}.lcStages button{font-size:0;gap:0;justify-content:center}.lcStages button span{font-size:10px;line-height:1.2}.lcStages button b{margin-right:5px}.lcKitchenCards,.lcFields{grid-template-columns:1fr}.lcKitchenInputs{grid-template-columns:repeat(3,minmax(0,1fr))}.lcCaseRow{grid-template-columns:minmax(0,1fr) auto}.lcStepHeading h2{font-size:24px}.lcFooter{display:block;padding:9px 0}.lcFooter span{display:block;padding-bottom:4px}}
+
+/* Classical LASTCRATE product pages; transaction workspace exists only inside its selected tab. */
+.lcSignPane{height:calc(100dvh - 178px);min-height:430px;display:flex;flex-direction:column;padding:12px 0 8px;overflow:hidden}
+.lcSignPane .lcStages{flex:0 0 auto}
+.lcSignPane .lcLayout{flex:1;min-height:0;padding:11px 0 0}
+.lcSignPane .lcWorkPanel,.lcSignPane .lcMonitor{min-height:0;overscroll-behavior:contain}
+.tabs{flex-wrap:wrap}
+@media(max-width:820px){
+ .lcSignPane{height:auto;min-height:0;overflow:visible}
+ .lcSignPane .lcLayout{min-height:0;overflow:visible}
+ .lcSignPane .lcWorkPanel,.lcSignPane .lcMonitor{overflow:visible}
+}

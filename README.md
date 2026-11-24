@@ -44,18 +44,20 @@ All seven write transaction reports were **FINALIZED / Consensus Accepted / GenV
 
 Additional separately tested reconciliations: **PARTIAL** (both report 16 of a planned 18, missing 2) and **DISPUTED** (driver 18 versus kitchen 16, with no invented agreed receipt). Historical test evidence is preserved in [Issue #1](https://github.com/bearbaba/LASTCRATE/issues/1).
 
-## Compact one-screen workflow
+## Classic LASTCRATE homepage and dedicated signing tab
 
-The homepage is **one workspace**, not three long product tabs. Its desktop layout keeps the wallet button, active step and live GenLayer transaction status visible together. Switch between four in-place steps without navigating away or scrolling through all the forms at once:
+The original LASTCRATE branding, hero section, proof review, and deterministic local scenario are restored. On first load the public landing page selects **01 / On-chain evidence**, showing the recorded GenLayer case. **02 / Review scenario** provides the existing local-only preview. **03 / Sign on GenLayer** is a dedicated tab that appears only when selected; it is not expanded below the other pages.
 
-1. **Donor opens:** edit donation ID, 18 crates, 16:40 pickup, 17:30 deadline and driver wallet. Click **New ID** if needed; `open_case` checks the contract for a pre-existing case before signing.
-2. **Kitchen offers:** Kitchen A starts receiving at 17:00 and accepts a maximum of six; Kitchen B starts at 17:45. Each kitchen signs with its own wallet. An explicitly labeled local-only estimate is shown nearby.
-3. **Consensus match:** donor separately seals and matches the case, then uses **Read allocation** to inspect the actual contract result.
-4. **Signed handoff:** driver and selected kitchen separately sign their declared quantities, then **Read handoff** checks the ledger result.
+Inside the signing tab the compact four-stage workspace remains:
 
-Only the selected step is displayed. On desktop the step panel and right-hand transaction rail can scroll independently if the viewport is short; on mobile the page stacks naturally. The right rail retains saved transaction history with automatic polling and public readback. Prior on-chain evidence, Explorer links and deployed contract addresses are available in the collapsed **Recorded proof and contract addresses** section, not a second long page.
+1. **Donor opens:** enter a fresh Case ID, 18 crates, pickup 16:40, deadline 17:30 and driver wallet, then request the signed `open_case` transaction. The app checks `get_case` for existing IDs before signing.
+2. **Kitchen offers:** each kitchen signs its own offer, with editable capacity and receiving-window notes.
+3. **Consensus match:** the donor signs `seal_case` and `match_case` separately, then reads the actual allocation.
+4. **Signed handoff:** driver and selected kitchen separately sign their quantities, then read the real `HandoffLedger` result.
 
-All default form values remain editable. The website does not sign transactions automatically, does not invent consensus results, and does not treat a signed quantity as independently verified physical delivery.
+The signing tab keeps its GenLayer status and saved transaction history in a side rail. On desktop only that panel or rail needs internal scrolling when the window is short; the other original product pages retain natural scrolling. Wallet signatures must always be approved by the user. A GenLayer transaction is automatically saved and followed in the same browser after its hash is returned, and monitoring resumes after reload.
+
+All seed data remains editable. Deterministic local estimates are not represented as real consensus, and signed delivery counts are not independent physical delivery proof.
 
 ## Connect Wallet and sign a rescue case
 
