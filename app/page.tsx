@@ -65,6 +65,7 @@ export default function Home(){
  },[]);
  useEffect(()=>{
   if(!pendingTx)return;
+  const transaction=pendingTx;
   let cancelled=false;
   let timer:ReturnType<typeof setTimeout>|undefined;
   const hash=pendingTx.hash;
@@ -79,7 +80,7 @@ export default function Home(){
      window.localStorage.removeItem(PENDING_KEY);
      setPendingTx(null);
      if(snapshot.verified){
-      setFeedback("FINALIZED · CONSENSUS ACCEPTED · EXECUTION SUCCESS / "+pendingTx.method+" / "+hash);
+      setFeedback("FINALIZED · CONSENSUS ACCEPTED · EXECUTION SUCCESS / "+transaction.method+" / "+hash);
      }else{
       setFeedback("TRANSACTION FINISHED WITHOUT VERIFIED SUCCESS / "+hash+" / "+snapshot.status+" · Check Explorer and contract readback; do not blindly retry.");
      }
