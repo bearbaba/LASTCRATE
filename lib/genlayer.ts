@@ -54,7 +54,7 @@ export function assertAcceptedExecution(tx:CommittedReceipt):void{
   throw Error("GenVM execution was not successful: "+(tx.txExecutionResultName||"unknown"));
 }
 function address(value:string){if(!/^0x[0-9a-fA-F]{40}$/.test(value))throw Error("Deployed 0x contract address required.");return value;}
-export async function signWrite(target:string,method:string,args:(string|number)[],expectedSigner?:string){
+export async function submitWrite(target:string,method:string,args:(string|number)[],expectedSigner?:string){
  if(typeof window==="undefined")throw Error("Browser wallet required.");
  const provider=getInjectedProvider();
  if(!provider)throw Error("Connect an EIP-1193 browser wallet first.");
@@ -69,7 +69,14 @@ export async function signWrite(target:string,method:string,args:(string|number)
   throw Error("Wallet account changed before signing. Reconnect and review the signer.");
  if(!isStudionetChain(current.chainId))throw Error("GenLayer Studionet is not selected.");
  const hash=await client.writeContract({address:address(target) as never,functionName:method,args,value:BigInt(0)});
- const tx=await client.waitForTransactionReceipt({hash,status:TransactionStatus.FINALIZED});
+ // The transaction ID is durable: return immediately so callers can poll and survive timeouts.
+ return hash;
+}
+/** Backwards-compatible blocking helper; live UI uses submitWrite + status polling. */
+export async function signWrite(target:string,method:string,args:(string|number)[],expectedSigner?:string){
+ const hash=await submitWrite(target,method,args,expectedSigner);
+ const reader=createClient({chain:studionet});
+ const tx=await reader.waitForTransactionReceipt({hash,status:TransactionStatus.FINALIZED});
  try{assertAcceptedExecution(tx as CommittedReceipt);}
  catch(error){throw Error("Submitted transaction "+hash+" not verified: "+(error instanceof Error?error.message:String(error)));}
  return hash;

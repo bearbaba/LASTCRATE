@@ -1,9 +1,12 @@
 "use client";
 import {useEffect,useMemo,useState} from "react";
 import {LATE_B,seedOffers,matchOffers,reconcile,type Offer} from "../lib/demo";
-import {connectWallet,getInjectedProvider,getWalletSession,isStudionetChain,signWrite,publicRead} from "../lib/genlayer";
+import {connectWallet,getInjectedProvider,getWalletSession,isStudionetChain,submitWrite,publicRead} from "../lib/genlayer";
 import {proof,transactions,explorerTx,prettyReadback} from "../lib/evidence";
 import {caseExistsFromReadback,newCaseId} from "../lib/rescue-case";
+import {isTransactionHash,type ChainSnapshot} from "../lib/tx-status";
+type PendingTransaction={hash:string;method:string;caseId:string};
+const PENDING_KEY="lastcrate:pendingGenLayerTx";
 type Tab="proof"|"dispatch"|"chain";
 const matcher=process.env.NEXT_PUBLIC_RESCUE_MATCHER_ADDRESS||"";
 const ledger=process.env.NEXT_PUBLIC_HANDOFF_LEDGER_ADDRESS||"";
@@ -18,6 +21,10 @@ export default function Home(){
  const [walletAddress,setWalletAddress]=useState("");const [walletChainId,setWalletChainId]=useState("");
  const [walletError,setWalletError]=useState("");
  const [sessionTxs,setSessionTxs]=useState<{method:string;hash:string}[]>([]);
+ const [pendingTx,setPendingTx]=useState<PendingTransaction|null>(null);
+ const [txProgress,setTxProgress]=useState<ChainSnapshot|null>(null);
+ const [txLastError,setTxLastError]=useState("");
+ const [trackHash,setTrackHash]=useState("");
  const result=useMemo(()=>matchOffers(offers,total,deadline,"16:40",caseId),[offers,total,deadline,caseId]);
  const chosen=result.selected;const validReport=!!chosen&&driverCount>=0&&kitchenCount>=0&&driverCount<=result.allocated&&kitchenCount<=result.allocated;
  const handoff=validReport?reconcile(result.allocated,driverCount,kitchenCount):null;
@@ -41,6 +48,67 @@ export default function Home(){
   provider.on?.("disconnect",disconnected);
   return()=>{active=false;provider.removeListener?.("accountsChanged",changed);provider.removeListener?.("chainChanged",changed);provider.removeListener?.("disconnect",disconnected);};
  },[]);
+ useEffect(()=>{
+  // Continue monitoring an already-submitted transaction after reloading or reopening this tab.
+  try{
+   const saved=window.localStorage.getItem(PENDING_KEY);
+   if(!saved)return;
+   const parsed:unknown=JSON.parse(saved);
+   if(typeof parsed!=="object"||!parsed)return;
+   const tx=parsed as Partial<PendingTransaction>;
+   if(typeof tx.hash==="string"&&isTransactionHash(tx.hash)&&typeof tx.caseId==="string"&&typeof tx.method==="string"){
+    setPendingTx({hash:tx.hash,caseId:tx.caseId,method:tx.method});
+    setCaseId(tx.caseId);setTrackHash(tx.hash);
+    setFeedback("Restored transaction "+tx.hash+". Checking on-chain status without re-signing.");
+   }
+  }catch{window.localStorage.removeItem(PENDING_KEY);}
+ },[]);
+ useEffect(()=>{
+  if(!pendingTx)return;
+  const transaction=pendingTx;
+  let cancelled=false;
+  let timer:ReturnType<typeof setTimeout>|undefined;
+  const hash=pendingTx.hash;
+  async function poll(){
+   try{
+    const response=await fetch("/api/tx-status?hash="+encodeURIComponent(hash),{cache:"no-store"});
+    const snapshot=await response.json() as ChainSnapshot&{error?:string};
+    if(!response.ok)throw Error(snapshot.error||"Unable to fetch transaction status");
+    if(cancelled)return;
+    setTxProgress(snapshot);setTxLastError("");
+    if(snapshot.verified||snapshot.terminalFailure){
+     window.localStorage.removeItem(PENDING_KEY);
+     setPendingTx(null);
+     if(snapshot.verified){
+      setFeedback("FINALIZED · CONSENSUS ACCEPTED · EXECUTION SUCCESS / "+transaction.method+" / "+hash);
+     }else{
+      setFeedback("TRANSACTION FINISHED WITHOUT VERIFIED SUCCESS / "+hash+" / "+snapshot.status+" · Check Explorer and contract readback; do not blindly retry.");
+     }
+     return;
+    }
+   }catch(err){
+    if(cancelled)return;
+    setTxLastError(err instanceof Error?err.message:String(err));
+   }
+   if(!cancelled)timer=setTimeout(poll,7000);
+  }
+  void poll();
+  return()=>{cancelled=true;if(timer)clearTimeout(timer);};
+ },[pendingTx]);
+ function followTransaction(tx:PendingTransaction){
+  setTxProgress(null);setTxLastError("");setTrackHash(tx.hash);
+  window.localStorage.setItem(PENDING_KEY,JSON.stringify(tx));
+  setPendingTx(tx);
+  setFeedback("TRANSACTION SUBMITTED / "+tx.hash+" · Monitoring GenLayer consensus and finalization; do not send another write while pending.");
+ }
+ function followEnteredHash(){
+  const hash=trackHash.trim();
+  if(!isTransactionHash(hash)){setTxLastError("Enter a full 0x + 64-character GenLayer transaction hash.");return;}
+  if(pendingTx&&pendingTx.hash.toLowerCase()!==hash.toLowerCase()){
+   setTxLastError("Another transaction is already being monitored. Resolve it before switching hashes.");return;
+  }
+  followTransaction({hash,caseId,method:"tracked transaction"});
+ }
  async function connectWalletUI(){
   setBusy("wallet_connect");setWalletError("");
   try{const session=await connectWallet();setWalletAddress(session.account);setWalletChainId(session.chainId);setDriverWallet(old=>old||session.account);}
@@ -50,6 +118,7 @@ export default function Home(){
  }
  const allocationId=caseId+":a1";
  function changeCaseId(value:string){
+  if(pendingTx){setFeedback("Wait for the submitted transaction to be resolved before changing Case ID.");return;}
   setCaseId(value);setFeedback("");setOutput("");setSessionTxs([]);
  }
  function freshCaseId(){changeCaseId(newCaseId());}
@@ -57,6 +126,7 @@ export default function Home(){
   setOffers(curr=>curr.map(x=>x.id===id?{...x,[key]:value}:x));
  }
  async function write(to:"matcher"|"ledger",method:string,args:(string|number)[]){
+  if(pendingTx){setFeedback("A transaction is still being monitored. Do not submit a duplicate.");return;}
   setBusy(method);setFeedback("");
   try{
    if(!signerReady())throw Error("Connect a wallet on GenLayer Studionet before signing.");
@@ -64,11 +134,13 @@ export default function Home(){
     const caseRecord=await publicRead(matcher,"get_case",[caseId]);
     if(caseExistsFromReadback(caseRecord))throw Error("This Case ID already exists on GenLayer. Check its status or choose New Case ID.");
    }
-   const hash=await signWrite(to==="matcher"?matcher:ledger,method,args);
+   // Return immediately with a hash. The background-in-page poller verifies the outcome.
+   const hash=await submitWrite(to==="matcher"?matcher:ledger,method,args);
    setSessionTxs(old=>[...old,{method,hash}]);
-   setFeedback("FINALIZED · CONSENSUS ACCEPTED · EXECUTION SUCCESS / "+method+" / "+hash);
+   followTransaction({hash,method,caseId});
   }
-  catch(e){setFeedback("TRANSACTION NOT VERIFIED / "+(e instanceof Error?e.message:String(e))+" · Inspect Explorer; do not blindly retry.");}finally{setBusy("");}
+  catch(e){setFeedback("TRANSACTION NOT SUBMITTED OR HASH NOT AVAILABLE / "+(e instanceof Error?e.message:String(e))+" · Check wallet and Explorer before trying again.");}
+  finally{setBusy("");}
  }
  async function read(to:"matcher"|"ledger",method:string,args:(string|number)[]){
   setBusy(method);setFeedback("");setOutput("");
@@ -107,17 +179,27 @@ export default function Home(){
   <section className="walletPanel" aria-label="Wallet connection"><div><span className="eyebrow">WALLET / GENLAYER STUDIONET</span><h2>{walletReady?"Wallet connected":"Connect your wallet to sign"}</h2><p>{walletReady?walletAddress+" · Studionet 61999":walletAddress?"Another network selected. Switch to GenLayer Studionet.":"Click Connect Wallet, approve the request, and select GenLayer Studionet. Read-only operations require no wallet."}</p>{walletError&&<p role="alert" className="walletError">{walletError}</p>}</div><button disabled={!!busy} onClick={connectWalletUI}>{walletReady?"Refresh / Switch Wallet":walletAddress?"Switch to Studionet":"Connect Wallet"}</button></section>
   <div className="liveLayout"><div className="liveMain">
    <section className="panel"><div className="liveStepTitle"><span className="stepNumber">01</span><div><span className="eyebrow">DONOR WALLET · RESCUEMATCHER</span><h2>Open a donation case</h2></div></div><p className="muted">The Case ID is unique on-chain. The first connected account is offered as the driver wallet; edit it if the driver is different.</p>
-    <div className="caseIdRow"><div><label>Case ID</label><input value={caseId} maxLength={64} onChange={e=>changeCaseId(e.target.value)} aria-label="Rescue Case ID"/></div><button className="secondary" onClick={freshCaseId}>New Case ID</button></div>
+    <div className="caseIdRow"><div><label>Case ID</label><input value={caseId} maxLength={64} disabled={!!pendingTx} onChange={e=>changeCaseId(e.target.value)} aria-label="Rescue Case ID"/></div><button className="secondary" disabled={!!pendingTx} onClick={freshCaseId}>New Case ID</button></div>
     <div className="fields"><div><label>Available crates</label><input type="number" min={1} max={10000} value={total} onChange={e=>setTotal(Math.max(1,Number(e.target.value)||1))}/></div><div><label>Deadline</label><input type="time" value={deadline} onChange={e=>setDeadline(e.target.value)}/></div><div><label>Pickup</label><input value="16:40" disabled/></div><div><label>Driver wallet</label><input value={driverWallet} onChange={e=>setDriverWallet(e.target.value)} placeholder="0x…" aria-label="Driver wallet address"/></div></div>
-    <div className="actions"><button disabled={!addressesReady||!!busy||!caseId||!driverWallet||existingCase||!walletReady} onClick={()=>write("matcher","open_case",[caseId,"Vegetable crates",total,"16:40",deadline,driverWallet])}>1 · Donor opens case</button><button className="secondary" disabled={!addressesReady||!!busy||!caseId} onClick={()=>read("matcher","get_case",[caseId])}>Check case on-chain</button></div>
+    <div className="actions"><button disabled={!addressesReady||!!busy||!caseId||!driverWallet||existingCase||!walletReady||!!pendingTx} onClick={()=>write("matcher","open_case",[caseId,"Vegetable crates",total,"16:40",deadline,driverWallet])}>1 · Donor opens case</button><button className="secondary" disabled={!addressesReady||!!busy||!caseId} onClick={()=>read("matcher","get_case",[caseId])}>Check case on-chain</button></div>
    </section>
    <section className="panel"><div className="liveStepTitle"><span className="stepNumber">02</span><div><span className="eyebrow">KITCHENS · INDEPENDENT WALLET SIGNATURES</span><h2>Submit receiving offers</h2></div></div><p className="muted">Use a distinct kitchen wallet for each offer. Each kitchen's capacity, delivery ETA and written intake conditions are supplied as signed claims.</p>
-   {offers.map((o,i)=><div key={o.id} className="liveOffer"><div className="offerHeading"><b>{o.id}</b><span>{i===0?"CAPACITY RESTRICTED":"RECEIVING WINDOW RESTRICTED"}</span></div><label>Natural-language intake note</label><textarea rows={2} value={o.note} onChange={e=>update(o.id,"note",e.target.value)}/><div className="liveOfferFields"><div><label>Arrival ETA</label><input type="time" value={o.arrival} onChange={e=>update(o.id,"arrival",e.target.value)}/></div><div><label>Advertised capacity</label><input type="number" min={0} max={10000} value={o.nominal} onChange={e=>update(o.id,"nominal",Number(e.target.value))}/></div><div><label>Distance (km)</label><input type="number" min={0} value={o.distanceKm} onChange={e=>update(o.id,"distanceKm",Number(e.target.value))}/></div></div><div className="actions"><button disabled={!addressesReady||!!busy||existingCase||!walletReady} onClick={()=>write("matcher","submit_offer",[caseId,o.id,o.note,o.nominal,o.arrival,o.distanceKm])}>2{String.fromCharCode(65+i)} · Submit {o.id} offer</button><small className="muted">Switch wallet to {o.id} before signing</small></div></div>)}
+   {offers.map((o,i)=><div key={o.id} className="liveOffer"><div className="offerHeading"><b>{o.id}</b><span>{i===0?"CAPACITY RESTRICTED":"RECEIVING WINDOW RESTRICTED"}</span></div><label>Natural-language intake note</label><textarea rows={2} value={o.note} onChange={e=>update(o.id,"note",e.target.value)}/><div className="liveOfferFields"><div><label>Arrival ETA</label><input type="time" value={o.arrival} onChange={e=>update(o.id,"arrival",e.target.value)}/></div><div><label>Advertised capacity</label><input type="number" min={0} max={10000} value={o.nominal} onChange={e=>update(o.id,"nominal",Number(e.target.value))}/></div><div><label>Distance (km)</label><input type="number" min={0} value={o.distanceKm} onChange={e=>update(o.id,"distanceKm",Number(e.target.value))}/></div></div><div className="actions"><button disabled={!addressesReady||!!busy||existingCase||!walletReady||!!pendingTx} onClick={()=>write("matcher","submit_offer",[caseId,o.id,o.note,o.nominal,o.arrival,o.distanceKm])}>2{String.fromCharCode(65+i)} · Submit {o.id} offer</button><small className="muted">Switch wallet to {o.id} before signing</small></div></div>)}
    </section>
-   <section className="panel"><div className="liveStepTitle"><span className="stepNumber">03</span><div><span className="eyebrow">DONOR WALLET · CONSENSUS MATCHING</span><h2>Seal and allocate</h2></div></div><p className="muted">After both offers have been accepted, return to the donor wallet. Sealing closes offer intake; matching creates an immutable allocation.</p><div className="actions"><button disabled={!addressesReady||!!busy||existingCase||!walletReady} onClick={()=>write("matcher","seal_case",[caseId])}>3 · Donor seals offers</button><button disabled={!addressesReady||!!busy||existingCase||!walletReady} onClick={()=>write("matcher","match_case",[caseId])}>4 · Match by consensus</button><button className="secondary" disabled={!addressesReady||!!busy} onClick={()=>read("matcher","get_allocation",[allocationId])}>Read allocation</button></div><small className="muted">Allocation ID: <code>{allocationId}</code></small></section>
-   <section className="panel"><div className="liveStepTitle"><span className="stepNumber">04</span><div><span className="eyebrow">HANDOFFLEDGER · INDEPENDENT RECEIPTS</span><h2>Confirm the handoff</h2></div></div><p className="muted">The driver and allocated kitchen each report their own quantity with their own account. The ledger compares signed declarations; it does not independently verify physical delivery.</p><div className="fields"><div><label>Driver's declared crates</label><input type="number" min={0} max={total} value={driverCount} onChange={e=>setDriverCount(Number(e.target.value))}/></div><div><label>Kitchen's declared crates</label><input type="number" min={0} max={total} value={kitchenCount} onChange={e=>setKitchenCount(Number(e.target.value))}/></div></div><div className="actions"><button disabled={!addressesReady||!!busy||existingCase||!walletReady} onClick={()=>write("ledger","confirm_dispatch",[allocationId,driverCount])}>5 · Driver confirms</button><button disabled={!addressesReady||!!busy||existingCase||!walletReady} onClick={()=>write("ledger","confirm_receipt",[allocationId,kitchenCount])}>6 · Kitchen confirms</button><button className="secondary" disabled={!addressesReady||!!busy} onClick={()=>read("ledger","get_handoff",[allocationId])}>Read handoff</button></div></section>
+   <section className="panel"><div className="liveStepTitle"><span className="stepNumber">03</span><div><span className="eyebrow">DONOR WALLET · CONSENSUS MATCHING</span><h2>Seal and allocate</h2></div></div><p className="muted">After both offers have been accepted, return to the donor wallet. Sealing closes offer intake; matching creates an immutable allocation.</p><div className="actions"><button disabled={!addressesReady||!!busy||existingCase||!walletReady||!!pendingTx} onClick={()=>write("matcher","seal_case",[caseId])}>3 · Donor seals offers</button><button disabled={!addressesReady||!!busy||existingCase||!walletReady||!!pendingTx} onClick={()=>write("matcher","match_case",[caseId])}>4 · Match by consensus</button><button className="secondary" disabled={!addressesReady||!!busy} onClick={()=>read("matcher","get_allocation",[allocationId])}>Read allocation</button></div><small className="muted">Allocation ID: <code>{allocationId}</code></small></section>
+   <section className="panel"><div className="liveStepTitle"><span className="stepNumber">04</span><div><span className="eyebrow">HANDOFFLEDGER · INDEPENDENT RECEIPTS</span><h2>Confirm the handoff</h2></div></div><p className="muted">The driver and allocated kitchen each report their own quantity with their own account. The ledger compares signed declarations; it does not independently verify physical delivery.</p><div className="fields"><div><label>Driver's declared crates</label><input type="number" min={0} max={total} value={driverCount} onChange={e=>setDriverCount(Number(e.target.value))}/></div><div><label>Kitchen's declared crates</label><input type="number" min={0} max={total} value={kitchenCount} onChange={e=>setKitchenCount(Number(e.target.value))}/></div></div><div className="actions"><button disabled={!addressesReady||!!busy||existingCase||!walletReady||!!pendingTx} onClick={()=>write("ledger","confirm_dispatch",[allocationId,driverCount])}>5 · Driver confirms</button><button disabled={!addressesReady||!!busy||existingCase||!walletReady||!!pendingTx} onClick={()=>write("ledger","confirm_receipt",[allocationId,kitchenCount])}>6 · Kitchen confirms</button><button className="secondary" disabled={!addressesReady||!!busy} onClick={()=>read("ledger","get_handoff",[allocationId])}>Read handoff</button></div></section>
   </div>
-  <aside className="panel console liveConsole"><span className="eyebrow">CONTRACT READBACK / LIVE</span><h2>Verification console</h2><p className="muted">Local estimates below are not GenLayer consensus. Use the read buttons to inspect recorded contract values.</p><div className="localPreview"><div><span>Expected receiver</span><strong>{chosen?.id||"None"}</strong></div><div><span>Locally feasible</span><strong>{result.allocated} / {total}</strong></div><div><span>Unallocated</span><strong>{result.unallocated}</strong></div></div><label>RescueMatcher</label><code>{matcher||"Not configured"}</code><label>HandoffLedger</label><code>{ledger||"Not configured"}</code><div className="feedback" role="status">{busy?"In progress: "+busy:feedback||"Connect a wallet to start, or use a read-only contract query."}</div><pre aria-label="Contract readback">{output||"Public contract readback appears here."}</pre>{sessionTxs.length>0&&<div className="sessionTx"><span className="eyebrow">FINALIZED WRITES · THIS SESSION</span>{sessionTxs.map((entry,i)=><a key={entry.hash+i} target="_blank" rel="noopener noreferrer" href={explorerTx(entry.hash)}>{i+1}. {entry.method} · {shortWallet(entry.hash)} ↗</a>)}</div>}</aside>
+  <aside className="panel console liveConsole"><span className="eyebrow">CONTRACT READBACK / LIVE</span><h2>Verification console</h2><p className="muted">Local estimates below are not GenLayer consensus. Use the read buttons to inspect recorded contract values.</p><div className="localPreview"><div><span>Expected receiver</span><strong>{chosen?.id||"None"}</strong></div><div><span>Locally feasible</span><strong>{result.allocated} / {total}</strong></div><div><span>Unallocated</span><strong>{result.unallocated}</strong></div></div><section className="txTracking" aria-label="GenLayer transaction tracking">
+  <span className="eyebrow">TRANSACTION LIFECYCLE</span>
+  <h3>{pendingTx?"Monitoring submitted transaction":txProgress?"Last checked transaction":"Track a GenLayer transaction"}</h3>
+  {pendingTx&&<div className="txTrackingState" role="status"><strong>{txProgress?.status||"Submitted · Checking network"}</strong><span>{txProgress?.message||"The wallet submitted a transaction. Waiting for the network status."}</span><code>{pendingTx.hash}</code><a target="_blank" rel="noopener noreferrer" href={explorerTx(pendingTx.hash)}>Open transaction in Explorer ↗</a></div>}
+  {!pendingTx&&txProgress&&<div className="txTrackingState" role="status"><strong>{txProgress.verified?"Verified success":txProgress.terminalFailure?"No verified success":txProgress.status}</strong><span>{txProgress.message}</span><a target="_blank" rel="noopener noreferrer" href={explorerTx(txProgress.hash)}>Open transaction in Explorer ↗</a></div>}
+  {txLastError&&<p className="walletError" role="alert">{txLastError} · The transaction outcome remains unverified.</p>}
+  <label>Existing transaction hash</label><input aria-label="GenLayer transaction hash" value={trackHash} onChange={e=>setTrackHash(e.target.value)} placeholder="0x + 64 hexadecimal characters" spellCheck={false}/>
+  <div className="actions"><button className="secondary" disabled={!!pendingTx||!!busy} onClick={followEnteredHash}>Follow transaction</button></div>
+  <p className="muted">Checks the on-chain status automatically while this page is open, and resumes after a reload. A timeout is not a failed transaction. Never re-sign solely because status is pending or unavailable.</p>
+ </section>
+ <label>RescueMatcher</label><code>{matcher||"Not configured"}</code><label>HandoffLedger</label><code>{ledger||"Not configured"}</code><div className="feedback" role="status">{busy?"In progress: "+busy:feedback||"Connect a wallet to start, or use a read-only contract query."}</div><pre aria-label="Contract readback">{output||"Public contract readback appears here."}</pre>{sessionTxs.length>0&&<div className="sessionTx"><span className="eyebrow">SUBMITTED WRITES · THIS SESSION</span>{sessionTxs.map((entry,i)=><a key={entry.hash+i} target="_blank" rel="noopener noreferrer" href={explorerTx(entry.hash)}>{i+1}. {entry.method} · {shortWallet(entry.hash)} ↗</a>)}</div>}</aside>
   </div>
  </div>}
  <footer><span>LASTCRATE / GENLAYER / 2026</span><span>LOCAL PREVIEW ≠ ON-CHAIN VERIFICATION · NO PHYSICAL PROOF CLAIM</span></footer></main>;
