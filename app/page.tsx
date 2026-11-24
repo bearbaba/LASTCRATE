@@ -6,7 +6,7 @@ import {proof,transactions,explorerTx,prettyReadback} from "../lib/evidence";
 import {caseExistsFromReadback,newCaseId} from "../lib/rescue-case";
 import {isTransactionHash,type ChainSnapshot} from "../lib/tx-status";
 import {TX_HISTORY_KEY,LEGACY_PENDING_KEY,parseTxHistory,mergeTxHistory,changeTxStatus,newestPendingTx,type SavedTx,type TxOutcome} from "../lib/tx-history";
-type PendingTransaction={hash:string;method:string;caseId:string};
+type PendingTransaction={hash:string;method:string;caseId:string;args?:(string|number)[];signer?:string};
 type ReadRecord=Record<string,unknown>;
 function readRecord(raw:string):ReadRecord|null{
  try{let value:unknown=JSON.parse(raw);if(typeof value==="string")value=JSON.parse(value);
@@ -14,13 +14,14 @@ function readRecord(raw:string):ReadRecord|null{
 }
 function observedState(tx:PendingTransaction,record:ReadRecord|null):boolean{
  if(!record||record.case_id!==tx.caseId)return false;
+ const args=tx.args;const signer=tx.signer?.toLowerCase();
  switch(tx.method){
-  case "open_case":return typeof record.donor==="string"&&typeof record.driver==="string"&&typeof record.crates==="number";
-  case "submit_offer":return Array.isArray(record.offers)&&record.offers.length>0;
+  case "open_case":return typeof record.donor==="string"&&typeof record.driver==="string"&&typeof record.crates==="number"&&(!args||(record.donor===signer&&record.driver===String(args[5]).toLowerCase()&&record.crates===args[2]&&record.lot_label===args[1]&&record.pickup_at===args[3]&&record.deadline===args[4]));
+  case "submit_offer":return !!args&&Array.isArray(record.offers)&&record.offers.some((o:ReadRecord)=>o.kitchen_id===args[1]&&o.kitchen_wallet===signer&&o.note===args[2]&&o.nominal_capacity===args[3]&&o.arrival_at===args[4]&&o.distance_km===args[5]);
   case "seal_case":return record.sealed===true;
   case "match_case":return record.allocation_id===tx.caseId+":a1"&&typeof record.allocated_crates==="number";
-  case "confirm_dispatch":return record.allocation_id===tx.caseId+":a1"&&typeof record.driver_report==="number";
-  case "confirm_receipt":return record.allocation_id===tx.caseId+":a1"&&typeof record.kitchen_report==="number";
+  case "confirm_dispatch":return record.allocation_id===tx.caseId+":a1"&&typeof record.driver_report==="number"&&(!args||(record.driver_report===args[1]&&record.driver_wallet===signer));
+  case "confirm_receipt":return record.allocation_id===tx.caseId+":a1"&&typeof record.kitchen_report==="number"&&(!args||(record.kitchen_report===args[1]&&record.kitchen_wallet===signer));
   default:return false;
  }
 }
@@ -59,6 +60,7 @@ export default function Home(){
  const handoff=validReport?reconcile(result.allocated,driverCount,kitchenCount):null;
  const addressesReady=!!matcher&&!!ledger;
  const existingCase=caseId===proof.caseId;
+ const openedCase=caseRecord?.case_id===caseId;
  const walletReady=!!walletAddress&&isStudionetChain(walletChainId);
  const pastHistoryVisible=walletReady&&historyChecked;
  const visibleHistory=walletReady?txHistory.filter(tx=>tx.caseId===caseId&&(historyChecked||sessionHashes.includes(tx.hash.toLowerCase()))):[];
@@ -159,7 +161,7 @@ export default function Home(){
     const outcome:TxOutcome=snapshot.verified?"verified":snapshot.terminalFailure?"failed":
       snapshot.finalized&&snapshot.receiptUnsupported?"unverified":"pending";
     persistHistory(changeTxStatus(historyRef.current,transaction.hash,{
-     status:snapshot.status,outcome,message:snapshot.message,checkedAt:new Date().toISOString()
+     status:snapshot.status,outcome:settled&&!snapshot.terminalFailure?"pending":outcome,message:snapshot.message,checkedAt:new Date().toISOString()
     }));
     if(settled){
      if(snapshot.terminalFailure){setPendingTx(null);setFeedback("TRANSACTION FINISHED WITHOUT VERIFIED SUCCESS / "+transaction.hash+" / "+snapshot.status+" · Check Explorer before retrying.");return;}
@@ -256,13 +258,13 @@ export default function Home(){
    const hash=await submitWrite(to==="matcher"?matcher:ledger,method,args,walletAddress,
     testGen=>setBusy("Confirm in wallet · estimated protocol fee "+testGen+" test GEN"));
    if(!isTransactionHash(hash))throw Error("Wallet submission returned an invalid transaction hash.");
-   followTransaction({hash,method,caseId});
+   followTransaction({hash,method,caseId,args,signer:walletAddress});
   }
   catch(e){
    const message=e instanceof Error?e.message:String(e);
    const extractedHash=message.match(/0x[0-9a-fA-F]{64}/)?.[0];
    if(extractedHash){
-    followTransaction({hash:extractedHash,method,caseId});
+    followTransaction({hash:extractedHash,method,caseId,args,signer:walletAddress});
     setFeedback("Transaction ID recovered from the wallet response and saved automatically. Checking on-chain before any retry.");
    }else setFeedback("Wallet or network did not return a usable transaction hash / "+message+" · Check wallet activity before retrying.");
   }
@@ -289,7 +291,7 @@ export default function Home(){
     <div className="proofKitchen"><div><b>Kitchen B <span className="proofNo">OUTSIDE RECEPTION WINDOW</span></b><strong>0 feasible</strong></div><q>We can receive up to 18 crates, but only from 17:45 onwards.</q><small>Receiving from {proof.window.kitchenBFrom}, after the deadline · 7 km declared</small></div>
     <div className="proofOutcome"><strong>12 crates remain explicitly unallocated.</strong><span>No allocation is fabricated to satisfy the full donation amount.</span></div>
    </section>
-   <aside className="panel console"><span className="eyebrow">LIVE READ / GENLAYER STUDIONET</span><h2>Check the recorded case yourself.</h2><p className="muted">These read-only calls query the deployed contracts. They require network access but not a wallet signature.</p><label>Allocation ID</label><code>{proof.allocationId}</code><div className="actions"><button disabled={!addressesReady||!!busy} onClick={()=>read("matcher","get_allocation",[proof.allocationId])}>Read allocation</button><button className="secondary" disabled={!addressesReady||!!busy} onClick={()=>read("ledger","get_handoff",[proof.allocationId])}>Read handoff</button></div><div className="feedback" role="status">{busy?"Reading "+busy+"…":feedback||"Select a public read to fetch the latest stored contract result."}</div><pre aria-label="Public on-chain readback">{output||"Contract response appears here. Recorded receipts are shown below."}</pre><div className="actions"><button className="secondary" onClick={()=>{setCaseId(proof.caseId);setOutput("");setFeedback("");setTab("chain");}}>Open recorded case in live workspace</button></div></aside>
+   <aside className="panel console"><span className="eyebrow">LIVE READ / GENLAYER STUDIONET</span><h2>Check the recorded case yourself.</h2><p className="muted">These read-only calls query the deployed contracts. They require network access but not a wallet signature.</p><label>Allocation ID</label><code>{proof.allocationId}</code><div className="actions"><button disabled={!addressesReady||!!busy} onClick={()=>read("matcher","get_allocation",[proof.allocationId])}>Read allocation</button><button className="secondary" disabled={!addressesReady||!!busy} onClick={()=>read("ledger","get_handoff",[proof.allocationId])}>Read handoff</button></div><div className="feedback" role="status">{busy?"Reading "+busy+"…":feedback||"Select a public read to fetch the latest stored contract result."}</div><pre aria-label="Public on-chain readback">{output||"Contract response appears here. Recorded receipts are shown below."}</pre><div className="actions"><button className="secondary" onClick={()=>{changeCaseId(proof.caseId);setTab("chain");}}>Open recorded case in live workspace</button></div></aside>
   </div>
   <section className="panel proofReceipts"><div className="proofHeading"><div><span className="eyebrow">HANDOFFLEDGER · MATCHED REPORTS</span><h2>Both parties declared six. The ledger reconciled six.</h2></div><span className="proofChip">STATUS / COMPLETE</span></div><div className="proofReconcile"><div><b>6</b><span>Planned</span></div><div><b>6</b><span>Driver report</span></div><div><b>6</b><span>Kitchen report</span></div><div><b>0</b><span>Missing</span></div></div><p className="muted">The ledger records wallet-signed claims and their agreement. It is not independent proof that food was physically delivered.</p>
    <h3>Transaction trail <small>FINALIZED · CONSENSUS ACCEPTED · GENVM SUCCESS</small></h3>{!pastHistoryVisible?<div className="actions"><button className="secondary" disabled={!walletReady||!!busy} onClick={checkSavedHistory}>{walletReady?"Check recorded transactions":"Connect wallet to check recorded transactions"}</button></div>:<div className="txGrid">{transactions.map((tx,i)=><a key={tx.hash} className="txItem" href={explorerTx(tx.hash)} target="_blank" rel="noopener noreferrer"><span className="txNumber">{String(i+1).padStart(2,"0")}</span><span><b>{tx.label}</b><small>{tx.role} · {tx.method}</small><code>{tx.hash.slice(0,11)}…{tx.hash.slice(-8)}</code></span><span aria-hidden="true">↗</span></a>)}</div>}
@@ -309,10 +311,11 @@ export default function Home(){
     {stage==="donation"&&<>
      <div className="lcStepHeading"><div><span className="eyebrow">01 · DONOR WALLET</span><h2>Open a donation case</h2></div><span>RescueMatcher</span></div>
      <p className="lcHelper">Create a unique case. The donor signs once; LASTCRATE automatically stores and follows the transaction.</p>
+     {openedCase&&!existingCase&&<p className="lcInfo">Case already exists on-chain. Keep this Case ID and switch to the independent kitchen wallets for the next step.</p>}
      {existingCase&&<p className="lcAlert">This historical case is already complete. Choose a new Case ID instead of replaying it.</p>}
      <div className="lcCaseRow"><label>Case ID<input aria-label="Rescue Case ID" value={caseId} maxLength={64} disabled={!!pendingTx||!!busy} onChange={e=>changeCaseId(e.target.value)}/></label><button className="secondary" disabled={!!pendingTx||!!busy} onClick={freshCaseId}>New ID</button></div>
      <div className="lcFields"><label>Crates<input type="number" min={1} max={10000} value={total} onChange={e=>setTotal(Math.max(1,Number(e.target.value)||1))}/></label><label>Pickup<input disabled value="16:40"/></label><label>Deadline<input type="time" value={deadline} onChange={e=>setDeadline(e.target.value)}/></label><label>Driver wallet<input value={driverWallet} onChange={e=>setDriverWallet(e.target.value)} placeholder="0x…" aria-label="Driver wallet address"/></label></div>
-     <div className="lcActions"><button disabled={!addressesReady||!!busy||!caseId||!driverWallet||existingCase||!walletReady||!!pendingTx} onClick={()=>write("matcher","open_case",[caseId,"Vegetable crates",total,"16:40",deadline,driverWallet])}>1 · Donor opens case</button><button className="secondary" disabled={!addressesReady||!!busy||!caseId} onClick={()=>read("matcher","get_case",[caseId])}>Read case</button><button className="lcNext" onClick={()=>setStage("kitchens")}>Kitchens →</button></div>
+     <div className="lcActions"><button disabled={!addressesReady||!!busy||!caseId||!driverWallet||existingCase||openedCase||!walletReady||!!pendingTx} onClick={()=>write("matcher","open_case",[caseId,"Vegetable crates",total,"16:40",deadline,driverWallet])}>1 · Donor opens case</button><button className="secondary" disabled={!addressesReady||!!busy||!caseId} onClick={()=>read("matcher","get_case",[caseId])}>Read case</button><button className="lcNext" onClick={()=>setStage("kitchens")}>Kitchens →</button></div>
     </>}
     {stage==="kitchens"&&<>
      <div className="lcStepHeading"><div><span className="eyebrow">02 · RECEIVER WALLETS</span><h2>Kitchen receiving offers</h2></div><span>RescueMatcher</span></div>
