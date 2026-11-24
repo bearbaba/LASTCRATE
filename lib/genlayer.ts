@@ -80,33 +80,33 @@ export async function submitWrite(target:string,method:string,args:(string|numbe
  if(!isStudionetChain(session.chainId))throw Error("Switch wallet to GenLayer Studionet (chain 61999) before signing.");
  const line=await checkStudioCompatibility();
  const sender=address(session.account);
- const chain=line==="v0.6"?studionetV06:studionet;
- const client=line==="v0.6"
-  ?createV06Client({chain:studionetV06,account:sender as never,provider})
-  :createClient({chain:studionet,account:sender as never,provider});
- await client.connect("studionet");
- const current=await getWalletSession();
- if(!current||!isExpectedSigner(current.account,expectedSigner)||current.account.toLowerCase()!==session.account.toLowerCase())
-  throw Error("Wallet account changed before signing. Reconnect and review the signer.");
- if(!isStudionetChain(current.chainId))throw Error("GenLayer Studionet is not selected.");
- const call={address:address(target) as `0x${string}`,functionName:method,args,value:0n};
  if(line==="v0.6"){
-  // A v0.6 Studio may charge protocol fees. Estimate for this exact call
-  // instead of sending a legacy fee-less transaction that always reverts.
+  const client=createV06Client({chain:studionetV06,account:sender as never,provider});
+  await client.connect("studionet");
+  const current=await getWalletSession();
+  if(!current||!isExpectedSigner(current.account,expectedSigner)||current.account.toLowerCase()!==session.account.toLowerCase())
+   throw Error("Wallet account changed before signing. Reconnect and review the signer.");
+  if(!isStudionetChain(current.chainId))throw Error("GenLayer Studionet is not selected.");
+  const call={address:address(target) as `0x${string}`,functionName:method,args,value:BigInt(0)};
   const quote=await client.estimateTransactionFeesForWrite(call);
   if(!quote||quote.feeValue===undefined||!quote.distribution)
    throw Error("GenLayer v0.6 fee estimate unavailable. Signing stopped before MetaMask.");
-  const hash=await client.writeContract({
+  // Explicit fee budget is mandatory on upgraded Studio, not optional gas guessing.
+  return client.writeContract({
    ...call,fees:{
     distribution:quote.distribution,
     feeValue:quote.feeValue,
     ...(quote.messageAllocations?{messageAllocations:quote.messageAllocations}:{})
    }
   });
-  return hash;
  }
- const hash=await client.writeContract(call);
- return hash;
+ const client=createClient({chain:studionet,account:sender as never,provider});
+ await client.connect("studionet");
+ const current=await getWalletSession();
+ if(!current||!isExpectedSigner(current.account,expectedSigner)||current.account.toLowerCase()!==session.account.toLowerCase())
+  throw Error("Wallet account changed before signing. Reconnect and review the signer.");
+ if(!isStudionetChain(current.chainId))throw Error("GenLayer Studionet is not selected.");
+ return client.writeContract({address:address(target) as never,functionName:method,args,value:BigInt(0)});
 }
 /** Backwards-compatible blocking helper; live UI uses submitWrite + status polling. */
 export async function signWrite(target:string,method:string,args:(string|number)[],expectedSigner?:string){
