@@ -44,12 +44,18 @@ All seven write transaction reports were **FINALIZED / Consensus Accepted / GenV
 
 Additional separately tested reconciliations: **PARTIAL** (both report 16 of a planned 18, missing 2) and **DISPUTED** (driver 18 versus kitchen 16, with no invented agreed receipt). Historical test evidence is preserved in [Issue #1](https://github.com/bearbaba/LASTCRATE/issues/1).
 
-## Review in three minutes
+## Live GenLayer workflow
 
-1. Open https://lastcrate.vercel.app/. The opening **On-chain evidence** section documents the completed signed test. Select **Read allocation** and **Read handoff** for fresh, read-only queries to the active contracts. Network access is required; no wallet signature is needed.
-2. Select **Review scenario** for the explicitly labeled *local preview*. Kitchen B initially receives 18 despite Kitchen A being closer. Click **Move B to 17:45**; Kitchen B becomes ineligible and Kitchen A receives only 6, leaving 12 unallocated. Local preview is not consensus evidence.
-3. Select **Live GenLayer** to open a **new**, unique donation case and submit signer-bound writes: donor opens, each kitchen signs its offer, donor seals and matches, then driver and chosen kitchen separately attest their actual declared quantities. Read the resulting allocation and handoff.
-4. Do **not** resubmit writes for the documented completed allocation. The UI disables writes when the recorded case ID is selected.
+The app opens directly in **01 / Live GenLayer**. It has editable donation details, kitchen receiving offers, wallet connection, all contract write actions and public readbacks in one place. The example inputs are: 18 vegetable crates at 16:40 with a 17:30 deadline; Kitchen A can receive six from 17:00 and Kitchen B receives only from 17:45. Local expectations are labeled as such and do **not** replace actual GenLayer consensus.
+
+1. Connect the donor's wallet in the header or Live GenLayer panel. The driver wallet field is offered the first connected address unless manually changed.
+2. Verify the Case ID or click **New Case ID** to generate a fresh identifier. Before `open_case`, the UI queries `get_case` to reject reused IDs instead of spending test tokens on a duplicate.
+3. Donor opens a case; switch to Kitchen A's wallet and submit its offer; switch to Kitchen B's wallet and submit its offer. The contract requires different accounts for donor/driver and receiving kitchens.
+4. Return to donor wallet, seal, then match. Read the immutable allocation by ID. For this example, expect Kitchen A 6 / 12 unallocated, but **confirm with the actual readback**.
+5. Driver and selected kitchen each separately submit a bounded receipt count. Read the ledger's handoff. `COMPLETE` means the parties' signed counts agree with the planned quantity, not that a physical delivery was independently observed.
+6. **02 / Review scenario** is a deterministic local preview. **03 / On-chain evidence** shows the earlier independently signed historical Studio case and Explorer transaction IDs.
+
+The initial Case ID is a convenience only, not evidence of an opened case. Click **Check case on-chain** or **New Case ID** if there is any possibility that it was used previously. The application never signs automatically or silently changes the active wallet.
 
 ## Connect Wallet and sign a rescue case
 
@@ -80,8 +86,9 @@ npm run build
 
 Node.js 22+ recommended. Python CI compiles both contracts, runs GenVM lint/check and GenLayer SDK direct-mode tests (mock LLM/validator fixtures). Direct-mode tests do not prove live consensus. Frontend regression tests check the bounded preview, signer receipt reconciliation, and documented proof integrity.
 
-- `app/page.tsx` — proof-first UI, local scenario and GenLayer wallet-signed actions.
+- `app/page.tsx` — live-first wallet-signed donation, kitchen offers, matching and handoff, plus local preview and recorded evidence.
 - `lib/evidence.ts` — immutable, explicitly dated Studio evidence plus Explorer links and readback formatting.
+- `lib/rescue-case.ts` — fresh case identifiers and protection against duplicate openings.
 - `lib/genlayer.ts` — Studionet client, read-only calls, and **consensus-aware** transaction validation.
 - `lib/demo.ts` — deterministic local preview; never presented as a live contract result.
 - `contracts/` — the two deployed Intelligent Contracts.
