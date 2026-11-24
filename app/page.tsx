@@ -1,12 +1,12 @@
 "use client";
-import {useEffect,useMemo,useState} from "react";
+import {useEffect,useMemo,useRef,useState} from "react";
 import {LATE_B,seedOffers,matchOffers,reconcile,type Offer} from "../lib/demo";
 import {connectWallet,getInjectedProvider,getWalletSession,isStudionetChain,submitWrite,publicRead} from "../lib/genlayer";
 import {proof,transactions,explorerTx,prettyReadback} from "../lib/evidence";
 import {caseExistsFromReadback,newCaseId} from "../lib/rescue-case";
 import {isTransactionHash,type ChainSnapshot} from "../lib/tx-status";
+import {TX_HISTORY_KEY,LEGACY_PENDING_KEY,parseTxHistory,mergeTxHistory,changeTxStatus,newestPendingTx,type SavedTx,type TxOutcome} from "../lib/tx-history";
 type PendingTransaction={hash:string;method:string;caseId:string};
-const PENDING_KEY="lastcrate:pendingGenLayerTx";
 type Tab="proof"|"dispatch"|"chain";
 const matcher=process.env.NEXT_PUBLIC_RESCUE_MATCHER_ADDRESS||"";
 const ledger=process.env.NEXT_PUBLIC_HANDOFF_LEDGER_ADDRESS||"";
@@ -20,11 +20,10 @@ export default function Home(){
  const [busy,setBusy]=useState("");const [feedback,setFeedback]=useState("");const [output,setOutput]=useState("");
  const [walletAddress,setWalletAddress]=useState("");const [walletChainId,setWalletChainId]=useState("");
  const [walletError,setWalletError]=useState("");
- const [sessionTxs,setSessionTxs]=useState<{method:string;hash:string}[]>([]);
+ const [txHistory,setTxHistory]=useState<SavedTx[]>([]);
+ const historyRef=useRef<SavedTx[]>([]);
  const [pendingTx,setPendingTx]=useState<PendingTransaction|null>(null);
- const [txProgress,setTxProgress]=useState<ChainSnapshot|null>(null);
  const [txLastError,setTxLastError]=useState("");
- const [trackHash,setTrackHash]=useState("");
  const result=useMemo(()=>matchOffers(offers,total,deadline,"16:40",caseId),[offers,total,deadline,caseId]);
  const chosen=result.selected;const validReport=!!chosen&&driverCount>=0&&kitchenCount>=0&&driverCount<=result.allocated&&kitchenCount<=result.allocated;
  const handoff=validReport?reconcile(result.allocated,driverCount,kitchenCount):null;
@@ -48,44 +47,62 @@ export default function Home(){
   provider.on?.("disconnect",disconnected);
   return()=>{active=false;provider.removeListener?.("accountsChanged",changed);provider.removeListener?.("chainChanged",changed);provider.removeListener?.("disconnect",disconnected);};
  },[]);
+ function persistHistory(next:SavedTx[]){
+  historyRef.current=next;setTxHistory(next);
+  try{window.localStorage.setItem(TX_HISTORY_KEY,JSON.stringify(next));}
+  catch{setTxLastError("Browser storage unavailable. Keep this page open until the transaction is confirmed.");}
+ }
  useEffect(()=>{
-  // Continue monitoring an already-submitted transaction after reloading or reopening this tab.
+  // Restore all signed transactions, including a pending hash saved by the earlier release.
   try{
-   const saved=window.localStorage.getItem(PENDING_KEY);
-   if(!saved)return;
-   const parsed:unknown=JSON.parse(saved);
-   if(typeof parsed!=="object"||!parsed)return;
-   const tx=parsed as Partial<PendingTransaction>;
-   if(typeof tx.hash==="string"&&isTransactionHash(tx.hash)&&typeof tx.caseId==="string"&&typeof tx.method==="string"){
-    setPendingTx({hash:tx.hash,caseId:tx.caseId,method:tx.method});
-    setCaseId(tx.caseId);setTrackHash(tx.hash);
-    setFeedback("Restored transaction "+tx.hash+". Checking on-chain status without re-signing.");
+   let saved=parseTxHistory(window.localStorage.getItem(TX_HISTORY_KEY));
+   const legacy=window.localStorage.getItem(LEGACY_PENDING_KEY);
+   if(legacy){
+    try{
+     const old=JSON.parse(legacy) as Partial<PendingTransaction>;
+     if(typeof old.hash==="string"&&isTransactionHash(old.hash)&&typeof old.caseId==="string"&&typeof old.method==="string"&&
+        !saved.some(tx=>tx.hash.toLowerCase()===old.hash!.toLowerCase())){
+      saved=mergeTxHistory(saved,[{hash:old.hash,method:old.method,caseId:old.caseId,
+       submittedAt:new Date().toISOString(),status:"Submitted",outcome:"pending",
+       message:"Restored from an earlier LASTCRATE session."}]);
+     }
+    }catch{}
+    window.localStorage.removeItem(LEGACY_PENDING_KEY);
    }
-  }catch{window.localStorage.removeItem(PENDING_KEY);}
+   historyRef.current=saved;setTxHistory(saved);
+   window.localStorage.setItem(TX_HISTORY_KEY,JSON.stringify(saved));
+   const unfinished=newestPendingTx(saved);
+   if(unfinished){
+    setCaseId(unfinished.caseId);
+    setPendingTx({hash:unfinished.hash,method:unfinished.method,caseId:unfinished.caseId});
+    setFeedback("Resumed automatic monitoring of the previously submitted "+unfinished.method+" transaction.");
+   }
+  }catch{setTxLastError("Browser storage unavailable; previous transaction history could not be restored.");}
  },[]);
  useEffect(()=>{
   if(!pendingTx)return;
   const transaction=pendingTx;
   let cancelled=false;
   let timer:ReturnType<typeof setTimeout>|undefined;
-  const hash=pendingTx.hash;
   async function poll(){
    try{
-    const response=await fetch("/api/tx-status?hash="+encodeURIComponent(hash),{cache:"no-store"});
+    const response=await fetch("/api/tx-status?hash="+encodeURIComponent(transaction.hash),{cache:"no-store"});
     const snapshot=await response.json() as ChainSnapshot&{error?:string;receiptUnsupported?:boolean};
     if(!response.ok)throw Error(snapshot.error||"Unable to fetch transaction status");
     if(cancelled)return;
-    setTxProgress(snapshot);setTxLastError("");
-    if(snapshot.verified||snapshot.terminalFailure||(snapshot.finalized&&snapshot.receiptUnsupported)){
-     window.localStorage.removeItem(PENDING_KEY);
+    setTxLastError("");
+    const settled=snapshot.verified||snapshot.terminalFailure||(snapshot.finalized&&snapshot.receiptUnsupported);
+    const outcome:TxOutcome=snapshot.verified?"verified":snapshot.terminalFailure?"failed":
+      snapshot.finalized&&snapshot.receiptUnsupported?"unverified":"pending";
+    persistHistory(changeTxStatus(historyRef.current,transaction.hash,{
+     status:snapshot.status,outcome,message:snapshot.message,checkedAt:new Date().toISOString()
+    }));
+    if(settled){
      setPendingTx(null);
-     if(snapshot.verified){
-      setFeedback("FINALIZED · CONSENSUS ACCEPTED · EXECUTION SUCCESS / "+transaction.method+" / "+hash);
-     }else if(snapshot.finalized&&snapshot.receiptUnsupported){
-      setFeedback("FINALIZED ON GENLAYER STUDIONET / "+hash+" · This node does not expose a detailed consensus/GenVM receipt. Check the case or allocation readback before continuing. Do not blindly retry.");
-     }else{
-      setFeedback("TRANSACTION FINISHED WITHOUT VERIFIED SUCCESS / "+hash+" / "+snapshot.status+" · Check Explorer and contract readback; do not blindly retry.");
-     }
+     if(snapshot.verified)setFeedback("FINALIZED · CONSENSUS ACCEPTED · EXECUTION SUCCESS / "+transaction.method+" / "+transaction.hash);
+     else if(snapshot.finalized&&snapshot.receiptUnsupported)
+      setFeedback("FINALIZED ON GENLAYER STUDIONET / "+transaction.hash+" · Detailed receipt unavailable. Check contract readback before another action.");
+     else setFeedback("TRANSACTION FINISHED WITHOUT VERIFIED SUCCESS / "+transaction.hash+" / "+snapshot.status+" · Check Explorer before retrying.");
      return;
     }
    }catch(err){
@@ -98,25 +115,12 @@ export default function Home(){
   return()=>{cancelled=true;if(timer)clearTimeout(timer);};
  },[pendingTx]);
  function followTransaction(tx:PendingTransaction){
-  setTxProgress(null);setTxLastError("");setTrackHash(tx.hash);
-  window.localStorage.setItem(PENDING_KEY,JSON.stringify(tx));
-  setPendingTx(tx);
-  setFeedback("TRANSACTION SUBMITTED / "+tx.hash+" · Monitoring GenLayer consensus and finalization; do not send another write while pending.");
- }
- function stopFollowing(){
-  if(!pendingTx)return;
-  window.localStorage.removeItem(PENDING_KEY);
-  setPendingTx(null);
-  setTxLastError("");
-  setFeedback("Stopped monitoring "+pendingTx.hash+". Transaction outcome remains unverified; stopping tracking does not cancel the blockchain transaction. Check Explorer and the case record before any new write.");
- }
- function followEnteredHash(){
-  const hash=trackHash.trim();
-  if(!isTransactionHash(hash)){setTxLastError("Enter a full 0x + 64-character GenLayer transaction hash.");return;}
-  if(pendingTx&&pendingTx.hash.toLowerCase()!==hash.toLowerCase()){
-   setTxLastError("Another transaction is already being monitored. Resolve it before switching hashes.");return;
-  }
-  followTransaction({hash,caseId,method:"tracked transaction"});
+  persistHistory(mergeTxHistory(historyRef.current,[{
+   ...tx,submittedAt:new Date().toISOString(),status:"Submitted",outcome:"pending",
+   message:"Wallet approved. Checking GenLayer automatically."
+  }]));
+  setTxLastError("");setPendingTx(tx);
+  setFeedback("TRANSACTION SUBMITTED / "+tx.hash+" · Hash saved automatically. Tracking the network.");
  }
  async function connectWalletUI(){
   setBusy("wallet_connect");setWalletError("");
@@ -128,7 +132,7 @@ export default function Home(){
  const allocationId=caseId+":a1";
  function changeCaseId(value:string){
   if(pendingTx){setFeedback("Wait for the submitted transaction to be resolved before changing Case ID.");return;}
-  setCaseId(value);setFeedback("");setOutput("");setSessionTxs([]);
+  setCaseId(value);setFeedback("");setOutput("");
  }
  function freshCaseId(){changeCaseId(newCaseId());}
  function update(id:string,key:keyof Offer,value:string|number){
@@ -145,10 +149,17 @@ export default function Home(){
    }
    // Return immediately with a hash. The background-in-page poller verifies the outcome.
    const hash=await submitWrite(to==="matcher"?matcher:ledger,method,args);
-   setSessionTxs(old=>[...old,{method,hash}]);
+   if(!isTransactionHash(hash))throw Error("Wallet submission returned an invalid transaction hash.");
    followTransaction({hash,method,caseId});
   }
-  catch(e){setFeedback("TRANSACTION NOT SUBMITTED OR HASH NOT AVAILABLE / "+(e instanceof Error?e.message:String(e))+" · Check wallet and Explorer before trying again.");}
+  catch(e){
+   const message=e instanceof Error?e.message:String(e);
+   const extractedHash=message.match(/0x[0-9a-fA-F]{64}/)?.[0];
+   if(extractedHash){
+    followTransaction({hash:extractedHash,method,caseId});
+    setFeedback("Transaction ID recovered from the wallet response and saved automatically. Checking on-chain before any retry.");
+   }else setFeedback("Wallet or network did not return a usable transaction hash / "+message+" · Check wallet activity before retrying.");
+  }
   finally{setBusy("");}
  }
  async function read(to:"matcher"|"ledger",method:string,args:(string|number)[]){
@@ -198,17 +209,22 @@ export default function Home(){
    <section className="panel"><div className="liveStepTitle"><span className="stepNumber">03</span><div><span className="eyebrow">DONOR WALLET · CONSENSUS MATCHING</span><h2>Seal and allocate</h2></div></div><p className="muted">After both offers have been accepted, return to the donor wallet. Sealing closes offer intake; matching creates an immutable allocation.</p><div className="actions"><button disabled={!addressesReady||!!busy||existingCase||!walletReady||!!pendingTx} onClick={()=>write("matcher","seal_case",[caseId])}>3 · Donor seals offers</button><button disabled={!addressesReady||!!busy||existingCase||!walletReady||!!pendingTx} onClick={()=>write("matcher","match_case",[caseId])}>4 · Match by consensus</button><button className="secondary" disabled={!addressesReady||!!busy} onClick={()=>read("matcher","get_allocation",[allocationId])}>Read allocation</button></div><small className="muted">Allocation ID: <code>{allocationId}</code></small></section>
    <section className="panel"><div className="liveStepTitle"><span className="stepNumber">04</span><div><span className="eyebrow">HANDOFFLEDGER · INDEPENDENT RECEIPTS</span><h2>Confirm the handoff</h2></div></div><p className="muted">The driver and allocated kitchen each report their own quantity with their own account. The ledger compares signed declarations; it does not independently verify physical delivery.</p><div className="fields"><div><label>Driver's declared crates</label><input type="number" min={0} max={total} value={driverCount} onChange={e=>setDriverCount(Number(e.target.value))}/></div><div><label>Kitchen's declared crates</label><input type="number" min={0} max={total} value={kitchenCount} onChange={e=>setKitchenCount(Number(e.target.value))}/></div></div><div className="actions"><button disabled={!addressesReady||!!busy||existingCase||!walletReady||!!pendingTx} onClick={()=>write("ledger","confirm_dispatch",[allocationId,driverCount])}>5 · Driver confirms</button><button disabled={!addressesReady||!!busy||existingCase||!walletReady||!!pendingTx} onClick={()=>write("ledger","confirm_receipt",[allocationId,kitchenCount])}>6 · Kitchen confirms</button><button className="secondary" disabled={!addressesReady||!!busy} onClick={()=>read("ledger","get_handoff",[allocationId])}>Read handoff</button></div></section>
   </div>
-  <aside className="panel console liveConsole"><span className="eyebrow">CONTRACT READBACK / LIVE</span><h2>Verification console</h2><p className="muted">Local estimates below are not GenLayer consensus. Use the read buttons to inspect recorded contract values.</p><div className="localPreview"><div><span>Expected receiver</span><strong>{chosen?.id||"None"}</strong></div><div><span>Locally feasible</span><strong>{result.allocated} / {total}</strong></div><div><span>Unallocated</span><strong>{result.unallocated}</strong></div></div><section className="txTracking" aria-label="GenLayer transaction tracking">
-  <span className="eyebrow">TRANSACTION LIFECYCLE</span>
-  <h3>{pendingTx?"Monitoring submitted transaction":txProgress?"Last checked transaction":"Track a GenLayer transaction"}</h3>
-  {pendingTx&&<div className="txTrackingState" role="status"><strong>{txProgress?.status||"Submitted · Checking network"}</strong><span>{txProgress?.message||"The wallet submitted a transaction. Waiting for the network status."}</span><code>{pendingTx.hash}</code><a target="_blank" rel="noopener noreferrer" href={explorerTx(pendingTx.hash)}>Open transaction in Explorer ↗</a></div>}
-  {!pendingTx&&txProgress&&<div className="txTrackingState" role="status"><strong>{txProgress.verified?"Verified success":txProgress.terminalFailure?"No verified success":txProgress.status}</strong><span>{txProgress.message}</span><a target="_blank" rel="noopener noreferrer" href={explorerTx(txProgress.hash)}>Open transaction in Explorer ↗</a></div>}
-  {txLastError&&<p className="walletError" role="alert">{txLastError} · The transaction outcome remains unverified.</p>}
-  <label>Existing transaction hash</label><input aria-label="GenLayer transaction hash" value={trackHash} onChange={e=>setTrackHash(e.target.value)} placeholder="0x + 64 hexadecimal characters" spellCheck={false}/>
-  <div className="actions"><button className="secondary" disabled={!!pendingTx||!!busy} onClick={followEnteredHash}>Follow transaction</button>{pendingTx&&<button className="secondary" disabled={!!busy} onClick={stopFollowing}>Stop monitoring (does not cancel transaction)</button>}</div>
-  <p className="muted">Checks the on-chain status automatically while this page is open, and resumes after a reload. A timeout is not a failed transaction. Never re-sign solely because status is pending or unavailable.</p>
+  <aside className="panel console liveConsole"><span className="eyebrow">CONTRACT READBACK / LIVE</span><h2>Verification console</h2><p className="muted">Local estimates below are not GenLayer consensus. Use the read buttons to inspect recorded contract values.</p><div className="localPreview"><div><span>Expected receiver</span><strong>{chosen?.id||"None"}</strong></div><div><span>Locally feasible</span><strong>{result.allocated} / {total}</strong></div><div><span>Unallocated</span><strong>{result.unallocated}</strong></div></div><section className="txTracking" aria-label="Automatic GenLayer transaction tracking">
+  <span className="eyebrow">AUTOMATIC TRANSACTION STATUS</span>
+  <h3>{pendingTx?"Following your signed transaction":"Saved transaction history"}</h3>
+  {pendingTx&&<div className="txFollowing" role="status" aria-live="polite"><span className="txSpinner" aria-hidden="true"/><div><strong>Tracking automatically — no action needed</strong><p>Hash saved. Checking GenLayer approximately every 7 seconds while this tab is open.</p></div></div>}
+  {txLastError&&<p className="walletError" role="alert">{txLastError} · Saved hashes are preserved. A network timeout is not proof of failure.</p>}
+  {txHistory.length===0?<p className="muted">No transactions signed in this browser yet. Approve a wallet transaction to see its hash and status automatically.</p>:
+   <div className="savedTransactions">{txHistory.slice(0,15).map(tx=>
+     <div className="savedTx" key={tx.hash}>
+      <div className="savedTxHeading"><strong>{tx.method}</strong><span className={"savedTxStatus "+tx.outcome}>{tx.outcome==="pending"?"● "+tx.status:tx.outcome==="verified"?"Verified success":tx.outcome==="failed"?"Not successful":"Finalized · result unverified"}</span></div>
+      <p>{tx.message}</p><code>{tx.hash}</code>
+      <div className="savedTxMeta"><span>Case: {tx.caseId}</span><span>Submitted: {new Date(tx.submittedAt).toLocaleString()}</span></div>
+      <a target="_blank" rel="noopener noreferrer" href={explorerTx(tx.hash)}>View in GenLayer Explorer ↗</a>
+     </div>)}</div>}
+  <p className="muted">There is no manual hash input or Follow button. Transaction hashes and status are saved on this device and restored after reload. FINALIZED alone is not proof of a successful execution.</p>
  </section>
- <label>RescueMatcher</label><code>{matcher||"Not configured"}</code><label>HandoffLedger</label><code>{ledger||"Not configured"}</code><div className="feedback" role="status">{busy?"In progress: "+busy:feedback||"Connect a wallet to start, or use a read-only contract query."}</div><pre aria-label="Contract readback">{output||"Public contract readback appears here."}</pre>{sessionTxs.length>0&&<div className="sessionTx"><span className="eyebrow">SUBMITTED WRITES · THIS SESSION</span>{sessionTxs.map((entry,i)=><a key={entry.hash+i} target="_blank" rel="noopener noreferrer" href={explorerTx(entry.hash)}>{i+1}. {entry.method} · {shortWallet(entry.hash)} ↗</a>)}</div>}</aside>
+ <label>RescueMatcher</label><code>{matcher||"Not configured"}</code><label>HandoffLedger</label><code>{ledger||"Not configured"}</code><div className="feedback" role="status">{busy?"In progress: "+busy:feedback||"Connect a wallet to start, or use a read-only contract query."}</div><pre aria-label="Contract readback">{output||"Public contract readback appears here."}</pre></aside>
   </div>
  </div>}
  <footer><span>LASTCRATE / GENLAYER / 2026</span><span>LOCAL PREVIEW ≠ ON-CHAIN VERIFICATION · NO PHYSICAL PROOF CLAIM</span></footer></main>;
