@@ -115,3 +115,24 @@
 .txTracking .actions{margin:10px 0 12px}
 .txTracking .muted{font:11px/1.6 Arial,sans-serif}
 .txTracking .walletError{font:11px/1.5 Arial,sans-serif;color:#a04f33}
+
+/* A signature triggers following automatically, with durable per-hash feedback. */
+.txFollowing{display:flex;gap:12px;align-items:center;margin:13px 0;padding:14px;border-radius:6px;background:#e2eddd;border:1px solid #b4cfb2;color:#24493c}
+.txFollowing strong{font:700 12px/1.4 Arial,sans-serif}
+.txFollowing p{margin:5px 0 0;font:11px/1.5 Arial,sans-serif;color:#46685c}
+.txSpinner{display:inline-block;width:24px;height:24px;flex:0 0 24px;border-radius:50%;border:3px solid #a2c3a2;border-top-color:#376e4a;animation:txRotate .8s linear infinite}
+@keyframes txRotate{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.txSpinner{animation:none;border-style:dashed}}
+.savedTransactions{display:flex;flex-direction:column;gap:10px;margin:15px 0}
+.savedTx{border:1px solid #d5e1d4;background:#fff;padding:12px;border-radius:6px}
+.savedTxHeading{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.savedTxHeading strong{font:700 12px/1.4 Arial,sans-serif;color:#294338}
+.savedTxStatus{font:700 10px/1.4 Arial,sans-serif;border-radius:4px;padding:5px 7px;background:#e1e8dd;color:#42694a}
+.savedTxStatus.pending{background:#f4eccf;color:#8c6b2b}
+.savedTxStatus.verified{background:#dcecd8;color:#266a39}
+.savedTxStatus.failed{background:#f2ddd9;color:#9b423c}
+.savedTxStatus.unverified{background:#e6eaf1;color:#4b647d}
+.savedTx p{font:11px/1.5 Arial,sans-serif;color:#64776b;margin:6px 0}
+.savedTx code{display:block;overflow-wrap:anywhere;font:10px/1.55 monospace;color:#3c5c4e}
+.savedTxMeta{display:flex;flex-wrap:wrap;gap:4px 14px;font:10px/1.5 monospace;color:#6c8579;margin:8px 0}
+.savedTx a{font:11px/1.5 monospace;color:#29644c;text-decoration:underline}

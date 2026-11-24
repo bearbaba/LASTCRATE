@@ -67,11 +67,15 @@ The initial Case ID is a convenience only, not evidence of an opened case. Click
 
 Wallet connection does not submit a transaction or require private keys. Any wallet approval must be initiated and confirmed by the user.
 
-## Transaction status following and safe recovery
+## Automatic transaction status and recovery
 
-Each wallet-approved write returns the transaction hash immediately. The **Live GenLayer → Verification console** monitors the transaction through a same-origin read-only endpoint (`/api/tx-status?hash=0x…`) that queries official Studionet JSON-RPC `gen_getTransactionStatus` and, after a decision or finalization, `gen_getTransactionReceipt`. This lets users see `Pending`, `Proposing`, `Committing`, `Revealing`, `Accepted` and `Finalized` without sending another wallet transaction.
+The **Live GenLayer → Verification console** automatically follows the exact transaction that the connected wallet just signed. As soon as GenLayerJS returns a transaction hash, LASTCRATE saves the case ID, method, hash, submission time, latest status and any later on-chain updates in this browser's local storage. Users **do not** paste transaction IDs or click a separate Follow button.
 
-The browser saves the pending hash and Case ID locally, resumes polling after a reload, and prevents another write while the preceding result is unresolved. Users can also paste any previously submitted hash into **Existing transaction hash → Follow transaction**. The RPC status endpoint is strictly read-only, validates 32-byte transaction IDs, and never signs or submits transactions. The lifecycle tracker reports verified success **only** with FINALIZED, majority agreement and successful GenVM execution. A timeout, an RPC outage, a missing receipt, or an absent status is **not** a transaction failure. A hash alone is not proof of success; inspect the contract readback and Explorer before continuing. While the tab is closed, polling pauses and resumes when it is opened again.
+While the browser tab is open, a visible loading indicator shows that the site checks the same-origin read-only endpoint `/api/tx-status` approximately every seven seconds. The status can progress through pending, proposing, committing, accepted and finalized. After a reload, previously saved history reappears automatically, and an unfinished transaction resumes polling. Earlier pending hashes from the former single-hash storage key are migrated. The history is bounded to 60 recent hashes and stores public metadata only; no private keys or wallet secrets.
+
+If the SDK throws an error containing a 32-byte transaction hash, the app also saves that hash and follows it instead of treating a timeout as a rejected transaction. If the wallet never returns a usable hash, the app explains that it cannot reconstruct one from nothing. Storage is **local to the same browser/device**; clearing browser data or using another device loses that local history. It is not a hosted database or a background notification service.
+
+The follower reports verified success only on FINALIZED with accepted consensus and successful execution. The current Studionet RPC can return FINALIZED without exposing a detailed receipt, in which case LASTCRATE explicitly says **finalized / result unverified**; inspect the public case, allocation or handoff readback. Unknown network status, missing transactions and RPC errors must not be presented as definitive failures. No wallet write is automatically retried.
 
 ## Trust boundaries
 
