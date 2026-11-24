@@ -44,10 +44,19 @@ export async function GET(request:NextRequest){
   ]);
   const tx=evmTx.result&&typeof evmTx.result==="object"?evmTx.result as Record<string,unknown>:null;
   const receipt=evmReceipt.result&&typeof evmReceipt.result==="object"?evmReceipt.result as Record<string,unknown>:null;
+  const simulation=tx&&typeof tx.to==="string"&&typeof tx.input==="string"?
+   await probeRpc("eth_call",[{from:tx.from,to:tx.to,data:tx.input,value:tx.value},"latest"]):
+   {error:"No EVM transaction calldata to inspect"};
   return NextResponse.json({
    hash,studionetChainId:"0xf22f",rpcChainId:typeof chainId.result==="string"?chainId.result:null,
    evm:{found:!!tx,receiptFound:!!receipt,receiptStatus:receipt?.status??null,
-    recipient:typeof tx?.to==="string"?tx.to:null,blockNumber:tx?.blockNumber??null},
+    recipient:typeof tx?.to==="string"?tx.to:null,
+    sender:typeof tx?.from==="string"?tx.from:null,
+    inputSelector:typeof tx?.input==="string"?tx.input.slice(0,10):null,
+    inputBytes:typeof tx?.input==="string"?Math.max(0,(tx.input.length-2)/2):null,
+    gas:tx?.gas??null,gasPrice:tx?.gasPrice??null,gasUsed:receipt?.gasUsed??null,
+    value:tx?.value??null,nonce:tx?.nonce??null,blockNumber:tx?.blockNumber??null},
+   callReplay:{available:!simulation.error,error:simulation.error??null,successResult:simulation.result??null},
    genlayer:{status:genStatus.result??null},
    diagnosticErrors:{
     chainId:chainId.error??null,evmTx:evmTx.error??null,evmReceipt:evmReceipt.error??null,gen:genStatus.error??null
