@@ -2,6 +2,8 @@
 import {createClient} from "genlayer-js";
 import {ExecutionResult,TransactionStatus} from "genlayer-js/types";
 import {studionet} from "genlayer-js/chains";
+import {createClient as createV06Client} from "genlayer-js-v2";
+import {studionet as studionetV06} from "genlayer-js-v2/chains";
 export type Provider={
  request:(args:{method:string;params?:unknown[]})=>Promise<unknown>;
  on?:(event:string,handler:(value:unknown)=>void)=>void;
@@ -9,6 +11,17 @@ export type Provider={
 };
 export type WalletSession={account:string;chainId:string};
 export const STUDIONET_CHAIN_ID="0xf22f"; // 61999, GenLayer hosted Studionet
+export type StudioLine="v0.6"|"legacy";
+/** Probe the server against the exact Studio RPC before each write. Fail closed on unknown node versions. */
+export async function checkStudioCompatibility():Promise<StudioLine>{
+ const response=await fetch("/api/studio-compat",{cache:"no-store",signal:AbortSignal.timeout(12000)});
+ if(!response.ok)throw Error("Cannot verify the active GenLayer Studio network; signing is disabled.");
+ const data=await response.json() as {studioLine?:string;chainId?:string};
+ if(data.chainId!==STUDIONET_CHAIN_ID)throw Error("GenLayer Studio RPC chain ID differs from 61999; signing blocked.");
+ if(data.studioLine==="v0.6"||data.studioLine==="legacy")return data.studioLine;
+ throw Error("Unable to determine Studio consensus version. No wallet transaction was sent.");
+}
+
 export function getInjectedProvider():Provider|null{
  if(typeof window==="undefined")return null;
  return (window as Window&{ethereum?:Provider}).ethereum||null;
@@ -36,7 +49,10 @@ export async function connectWallet():Promise<WalletSession>{
  if(!provider)throw Error("No browser wallet detected. Install/unlock a compatible wallet, then reload the page.");
  const account=firstAccount(await provider.request({method:"eth_requestAccounts"}));
  if(!account)throw Error("Wallet connection was not approved.");
- const client=createClient({chain:studionet,account:account as never,provider});
+ const line=await checkStudioCompatibility();
+ const client=line==="v0.6"?
+  createV06Client({chain:studionetV06,account:account as never,provider}):
+  createClient({chain:studionet,account:account as never,provider});
  await client.connect("studionet");
  const session=await getWalletSession();
  if(!session)throw Error("Wallet disconnected during network selection.");
@@ -62,14 +78,34 @@ export async function submitWrite(target:string,method:string,args:(string|numbe
  if(!session)throw Error("Connect Wallet before submitting a transaction.");
  if(!isExpectedSigner(session.account,expectedSigner))throw Error("Wrong wallet: switch to "+expectedSigner+" before signing "+method+".");
  if(!isStudionetChain(session.chainId))throw Error("Switch wallet to GenLayer Studionet (chain 61999) before signing.");
- const client=createClient({chain:studionet,account:address(session.account) as never,provider});
+ const line=await checkStudioCompatibility();
+ const sender=address(session.account);
+ const chain=line==="v0.6"?studionetV06:studionet;
+ const client=line==="v0.6"
+  ?createV06Client({chain:studionetV06,account:sender as never,provider})
+  :createClient({chain:studionet,account:sender as never,provider});
  await client.connect("studionet");
  const current=await getWalletSession();
  if(!current||!isExpectedSigner(current.account,expectedSigner)||current.account.toLowerCase()!==session.account.toLowerCase())
   throw Error("Wallet account changed before signing. Reconnect and review the signer.");
  if(!isStudionetChain(current.chainId))throw Error("GenLayer Studionet is not selected.");
- const hash=await client.writeContract({address:address(target) as never,functionName:method,args,value:BigInt(0)});
- // The transaction ID is durable: return immediately so callers can poll and survive timeouts.
+ const call={address:address(target) as `0x${string}`,functionName:method,args,value:0n};
+ if(line==="v0.6"){
+  // A v0.6 Studio may charge protocol fees. Estimate for this exact call
+  // instead of sending a legacy fee-less transaction that always reverts.
+  const quote=await client.estimateTransactionFeesForWrite(call);
+  if(!quote||quote.feeValue===undefined||!quote.distribution)
+   throw Error("GenLayer v0.6 fee estimate unavailable. Signing stopped before MetaMask.");
+  const hash=await client.writeContract({
+   ...call,fees:{
+    distribution:quote.distribution,
+    feeValue:quote.feeValue,
+    ...(quote.messageAllocations?{messageAllocations:quote.messageAllocations}:{})
+   }
+  });
+  return hash;
+ }
+ const hash=await client.writeContract(call);
  return hash;
 }
 /** Backwards-compatible blocking helper; live UI uses submitWrite + status polling. */
