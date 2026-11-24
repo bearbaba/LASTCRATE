@@ -73,6 +73,19 @@ export async function GET(request:NextRequest){
  // Some Studio nodes respond with "Transaction <hash> not found" before indexing.
  // This is not a transient server outage and must never be reported as a failed write.
  if(rawStatus===null&&/not found|does not exist|unknown transaction/i.test(statusError)){
+  // A MetaMask-confirmed EVM envelope can revert before GenLayer creates any
+  // protocol transaction. Check the EVM receipt before labeling it "pending".
+  const evmRead=await probeRpc("eth_getTransactionReceipt",[hash]);
+  const envelope=evmRead.result&&typeof evmRead.result==="object"?
+   evmRead.result as Record<string,unknown>:null;
+  if(envelope&&envelope.status==="0x0"){
+   const reverted=normalizeSnapshot(hash,{status:"EVM_REVERTED",statusCode:0},null);
+   return NextResponse.json({...reverted,status:"EVM_REVERTED",
+    terminalFailure:true,verified:false,finalized:false,
+    evmReceiptStatus:"0x0",evmReverted:true,
+    message:"FAILED: The wallet-signed EVM transaction reverted before GenLayer consensus. No Intelligent Contract transaction was created. Do not blindly resend. Verify SDK/Studio submission compatibility.",
+    network:"GenLayer Studionet",checkedAt:new Date().toISOString()},{headers:noCache});
+  }
   const missing=normalizeSnapshot(hash,{status:"Uninitialized",statusCode:0},null);
   return NextResponse.json({...missing,
    message:"Transaction not found on GenLayer Studionet yet. Confirm the wallet network and check the case record; do not blindly re-sign.",
