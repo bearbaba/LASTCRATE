@@ -152,7 +152,8 @@ export default function Home(){
     if(caseExistsFromReadback(caseRecord))throw Error("This Case ID already exists on GenLayer. Check its status or choose New Case ID.");
    }
    // Return immediately with a hash. The background-in-page poller verifies the outcome.
-   const hash=await submitWrite(to==="matcher"?matcher:ledger,method,args);
+   const hash=await submitWrite(to==="matcher"?matcher:ledger,method,args,undefined,
+    testGen=>setBusy("Confirm in wallet · estimated protocol fee "+testGen+" test GEN"));
    if(!isTransactionHash(hash))throw Error("Wallet submission returned an invalid transaction hash.");
    followTransaction({hash,method,caseId});
   }

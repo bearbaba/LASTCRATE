@@ -59,6 +59,18 @@ The signing tab keeps its GenLayer status and saved transaction history in a sid
 
 All seed data remains editable. Deterministic local estimates are not represented as real consensus, and signed delivery counts are not independent physical delivery proof.
 
+## Studionet consensus version, fee safety and browser wallet status
+
+On **November 24, 2026**, read-only `sim_getFeeConfig` confirmed that the stable Studio RPC at `https://studio.genlayer.com/api` is running the **Consensus v0.6** line on chain ID **61999**. Before this update, two wallet-submitted EVM envelopes reverted (`eth_getTransactionReceipt.status=0x0`), and no corresponding Intelligent Contract transaction was created. Their cases were absent from RescueMatcher. A MetaMask confirmation screen or a returned EVM hash is not proof that an Intelligent Contract write succeeded.
+
+LASTCRATE now probes the active Studio version and the chain identity **before signing**. An unknown or unreachable RPC blocks the write rather than falling back to a potentially incompatible SDK.
+
+- **v0.6 Studio:** uses `genlayer-js-v2`, pinned to `2.0.0-rc.2`, and estimates fees for the **exact contract method and arguments** before any wallet transaction. The quote's distribution and fee value are passed unchanged to `writeContract`. The sender account and chain are checked again after estimation. The UI shows the estimated test-GEN deposit while awaiting wallet confirmation.
+- **Legacy Studio:** uses the existing `genlayer-js` 1.1.x client. It is selected **only** if the RPC explicitly reports that `sim_getFeeConfig` does not exist.
+- **RPC failure or unexpected chain/version:** signing is blocked and no transaction is submitted. No write is silently retried.
+
+A read-only fee quotation for `RescueMatcher.open_case` using the pinned v0.6 SDK succeeded on the hosted Studionet on November 24, 2026, with a nonzero test-GEN budget. The temporary quotation test endpoint was removed after validation. **Browser-wallet end-to-end success remains unverified until an owner-approved new write is accepted by GenLayer and the matching contract readback is confirmed.** The previous seven GenLayer Studio transactions and on-chain records remain separate historical evidence.
+
 ## Connect Wallet and sign a rescue case
 
 1. Open the live site and click **Connect Wallet** in the header.
