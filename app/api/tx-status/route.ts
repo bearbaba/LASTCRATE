@@ -25,7 +25,7 @@ export async function GET(request:NextRequest){
   return NextResponse.json({error:"Valid 0x + 64-hex transaction hash required."},{status:400,headers:noCache});
  }
  let rawStatus:unknown=null,rawReceipt:unknown=null;
- let statusError="",receiptError="";
+ let statusError="",receiptError="",dataError="";
  try{rawStatus=await rpc("gen_getTransactionStatus",hash);}
  catch(error){statusError=error instanceof Error?error.message:String(error);}
  const status=rawStatus as {statusCode?:unknown;status?:unknown}|null;
@@ -35,7 +35,7 @@ export async function GET(request:NextRequest){
  if(checkReceipt){
   // Newer GenLayer nodes expose getTransactionData; older ones may only serve Receipt.
   try{rawReceipt=await rpc("gen_getTransactionData",hash);}
-  catch(error){receiptError=error instanceof Error?error.message:String(error);}
+  catch(error){dataError=error instanceof Error?error.message:String(error);}
   if(rawReceipt===null){
    try{rawReceipt=await rpc("gen_getTransactionReceipt",hash);}
    catch(error){receiptError=error instanceof Error?error.message:String(error);}
@@ -53,5 +53,6 @@ export async function GET(request:NextRequest){
  const normalized=normalizeSnapshot(hash,rawStatus,rawReceipt);
  return NextResponse.json({...normalized,receiptAvailable:rawReceipt!==null,
   receiptCheckPending:rawReceipt===null&&!!receiptError,
+  receiptDiagnostic:rawReceipt===null?[dataError,receiptError].filter(Boolean).map(x=>x.slice(0,180)):undefined,
   network:"GenLayer Studionet",checkedAt:new Date().toISOString()},{headers:noCache});
 }
