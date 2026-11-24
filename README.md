@@ -67,6 +67,12 @@ The initial Case ID is a convenience only, not evidence of an opened case. Click
 
 Wallet connection does not submit a transaction or require private keys. Any wallet approval must be initiated and confirmed by the user.
 
+## Transaction status following and safe recovery
+
+Each wallet-approved write returns the transaction hash immediately. The **Live GenLayer → Verification console** monitors the transaction through a same-origin read-only endpoint (`/api/tx-status?hash=0x…`) that queries official Studionet JSON-RPC `gen_getTransactionStatus` and, after a decision or finalization, `gen_getTransactionReceipt`. This lets users see `Pending`, `Proposing`, `Committing`, `Revealing`, `Accepted` and `Finalized` without sending another wallet transaction.
+
+The browser saves the pending hash and Case ID locally, resumes polling after a reload, and prevents another write while the preceding result is unresolved. Users can also paste any previously submitted hash into **Existing transaction hash → Follow transaction**. The RPC status endpoint is strictly read-only, validates 32-byte transaction IDs, and never signs or submits transactions. The lifecycle tracker reports verified success **only** with FINALIZED, majority agreement and successful GenVM execution. A timeout, an RPC outage, a missing receipt, or an absent status is **not** a transaction failure. A hash alone is not proof of success; inspect the contract readback and Explorer before continuing. While the tab is closed, polling pauses and resumes when it is opened again.
+
 ## Trust boundaries
 
 - Source notes, ETA, distance, driver counts and kitchen counts are **claims supplied by participants**. No GPS, sensors, scale readings, or proof of food quality is included.
