@@ -44,22 +44,22 @@ All seven write transaction reports were **FINALIZED / Consensus Accepted / GenV
 
 Additional separately tested reconciliations: **PARTIAL** (both report 16 of a planned 18, missing 2) and **DISPUTED** (driver 18 versus kitchen 16, with no invented agreed receipt). Historical test evidence is preserved in [Issue #1](https://github.com/bearbaba/LASTCRATE/issues/1).
 
-## Live GenLayer workflow
+## Compact one-screen workflow
 
-The app opens directly in **01 / Live GenLayer**. It has editable donation details, kitchen receiving offers, wallet connection, all contract write actions and public readbacks in one place. The example inputs are: 18 vegetable crates at 16:40 with a 17:30 deadline; Kitchen A can receive six from 17:00 and Kitchen B receives only from 17:45. Local expectations are labeled as such and do **not** replace actual GenLayer consensus.
+The homepage is **one workspace**, not three long product tabs. Its desktop layout keeps the wallet button, active step and live GenLayer transaction status visible together. Switch between four in-place steps without navigating away or scrolling through all the forms at once:
 
-1. Connect the donor's wallet in the header or Live GenLayer panel. The driver wallet field is offered the first connected address unless manually changed.
-2. Verify the Case ID or click **New Case ID** to generate a fresh identifier. Before `open_case`, the UI queries `get_case` to reject reused IDs instead of spending test tokens on a duplicate.
-3. Donor opens a case; switch to Kitchen A's wallet and submit its offer; switch to Kitchen B's wallet and submit its offer. The contract requires different accounts for donor/driver and receiving kitchens.
-4. Return to donor wallet, seal, then match. Read the immutable allocation by ID. For this example, expect Kitchen A 6 / 12 unallocated, but **confirm with the actual readback**.
-5. Driver and selected kitchen each separately submit a bounded receipt count. Read the ledger's handoff. `COMPLETE` means the parties' signed counts agree with the planned quantity, not that a physical delivery was independently observed.
-6. **02 / Review scenario** is a deterministic local preview. **03 / On-chain evidence** shows the earlier independently signed historical Studio case and Explorer transaction IDs.
+1. **Donor opens:** edit donation ID, 18 crates, 16:40 pickup, 17:30 deadline and driver wallet. Click **New ID** if needed; `open_case` checks the contract for a pre-existing case before signing.
+2. **Kitchen offers:** Kitchen A starts receiving at 17:00 and accepts a maximum of six; Kitchen B starts at 17:45. Each kitchen signs with its own wallet. An explicitly labeled local-only estimate is shown nearby.
+3. **Consensus match:** donor separately seals and matches the case, then uses **Read allocation** to inspect the actual contract result.
+4. **Signed handoff:** driver and selected kitchen separately sign their declared quantities, then **Read handoff** checks the ledger result.
 
-The initial Case ID is a convenience only, not evidence of an opened case. Click **Check case on-chain** or **New Case ID** if there is any possibility that it was used previously. The application never signs automatically or silently changes the active wallet.
+Only the selected step is displayed. On desktop the step panel and right-hand transaction rail can scroll independently if the viewport is short; on mobile the page stacks naturally. The right rail retains saved transaction history with automatic polling and public readback. Prior on-chain evidence, Explorer links and deployed contract addresses are available in the collapsed **Recorded proof and contract addresses** section, not a second long page.
+
+All default form values remain editable. The website does not sign transactions automatically, does not invent consensus results, and does not treat a signed quantity as independently verified physical delivery.
 
 ## Connect Wallet and sign a rescue case
 
-1. Open the live site and click **Connect Wallet** in the header or in **Live GenLayer**.
+1. Open the live site and click **Connect Wallet** in the header.
 2. Approve the browser wallet connection and select **GenLayer Studionet (chain 61999)**.
 3. Create a unique case ID, select your wallet role, and submit only the transaction permitted for your account. The donor opens and seals; each kitchen signs its own offer; the selected kitchen and driver sign separate quantity reports.
 4. After each transaction, verify **FINALIZED + Accepted consensus + successful GenVM execution**. Public allocation and handoff reads do not require wallet access.
@@ -96,7 +96,7 @@ npm run build
 
 Node.js 22+ recommended. Python CI compiles both contracts, runs GenVM lint/check and GenLayer SDK direct-mode tests (mock LLM/validator fixtures). Direct-mode tests do not prove live consensus. Frontend regression tests check the bounded preview, signer receipt reconciliation, and documented proof integrity.
 
-- `app/page.tsx` — live-first wallet-signed donation, kitchen offers, matching and handoff, plus local preview and recorded evidence.
+- `app/page.tsx` — single-screen, four-step wallet-signed donation and handoff, compact automatic transaction status, collapsible historical evidence.
 - `lib/evidence.ts` — immutable, explicitly dated Studio evidence plus Explorer links and readback formatting.
 - `lib/rescue-case.ts` — fresh case identifiers and protection against duplicate openings.
 - `lib/genlayer.ts` — Studionet client, read-only calls, and **consensus-aware** transaction validation.
