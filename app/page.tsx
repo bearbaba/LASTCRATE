@@ -72,15 +72,17 @@ export default function Home(){
   async function poll(){
    try{
     const response=await fetch("/api/tx-status?hash="+encodeURIComponent(hash),{cache:"no-store"});
-    const snapshot=await response.json() as ChainSnapshot&{error?:string};
+    const snapshot=await response.json() as ChainSnapshot&{error?:string;receiptUnsupported?:boolean};
     if(!response.ok)throw Error(snapshot.error||"Unable to fetch transaction status");
     if(cancelled)return;
     setTxProgress(snapshot);setTxLastError("");
-    if(snapshot.verified||snapshot.terminalFailure){
+    if(snapshot.verified||snapshot.terminalFailure||(snapshot.finalized&&snapshot.receiptUnsupported)){
      window.localStorage.removeItem(PENDING_KEY);
      setPendingTx(null);
      if(snapshot.verified){
       setFeedback("FINALIZED · CONSENSUS ACCEPTED · EXECUTION SUCCESS / "+transaction.method+" / "+hash);
+     }else if(snapshot.finalized&&snapshot.receiptUnsupported){
+      setFeedback("FINALIZED ON GENLAYER STUDIONET / "+hash+" · This node does not expose a detailed consensus/GenVM receipt. Check the case or allocation readback before continuing. Do not blindly retry.");
      }else{
       setFeedback("TRANSACTION FINISHED WITHOUT VERIFIED SUCCESS / "+hash+" / "+snapshot.status+" · Check Explorer and contract readback; do not blindly retry.");
      }
