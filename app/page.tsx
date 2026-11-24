@@ -76,8 +76,13 @@ export default function Home(){
   catch{setTxLastError("Browser storage unavailable. Keep this page open until the transaction is confirmed.");}
  }
  useEffect(()=>{
-  // Fresh case, without deleting saved transactions.
+  // Fresh case, without deleting saved transactions or retaining referral tags in demo recordings.
   setCaseId(newCaseId());
+  const url=new URL(window.location.href);
+  if(url.searchParams.get("utm_source")==="chatgpt.com"){
+   url.searchParams.delete("utm_source");
+   window.history.replaceState(window.history.state,"",url.pathname+url.search+url.hash);
+  }
   try{
    let saved=parseTxHistory(window.localStorage.getItem(TX_HISTORY_KEY));
    const legacy=window.localStorage.getItem(LEGACY_PENDING_KEY);
