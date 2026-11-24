@@ -17,10 +17,13 @@ export default function Home(){
  const [tab,setTab]=useState<Tab>("proof");
  const [stage,setStage]=useState<Stage>("donation");
  const [showAllHistory,setShowAllHistory]=useState(false);
+ const [historyChecked,setHistoryChecked]=useState(false);
+ const [sessionHashes,setSessionHashes]=useState<string[]>([]);
+ const connectedExplicitly=useRef(false);
  const [offers,setOffers]=useState<Offer[]>(()=>seedOffers.map(offer=>offer.id==="Kitchen B"?{...offer,note:LATE_B}:offer));
  const [total,setTotal]=useState(18);const [deadline,setDeadline]=useState("17:30");
  const [driverCount,setDriverCount]=useState(6);const [kitchenCount,setKitchenCount]=useState(6);
- const [caseId,setCaseId]=useState("lastcrate-241126-rescue-01");const [driverWallet,setDriverWallet]=useState("");
+ const [caseId,setCaseId]=useState("");const [driverWallet,setDriverWallet]=useState("");
  const [busy,setBusy]=useState("");const [feedback,setFeedback]=useState("");const [output,setOutput]=useState("");
  const [walletAddress,setWalletAddress]=useState("");const [walletChainId,setWalletChainId]=useState("");
  const [walletError,setWalletError]=useState("");
@@ -34,22 +37,52 @@ export default function Home(){
  const addressesReady=!!matcher&&!!ledger;
  const existingCase=caseId===proof.caseId;
  const walletReady=!!walletAddress&&isStudionetChain(walletChainId);
+ const pastHistoryVisible=walletReady&&historyChecked;
+ const visibleHistory=walletReady?txHistory.filter(tx=>pastHistoryVisible||(tx.caseId===caseId&&sessionHashes.includes(tx.hash.toLowerCase()))):[];
  function signerReady():boolean{return walletReady;}
  useEffect(()=>{
   const provider=getInjectedProvider();
   if(!provider)return;
   let active=true;
-  const refresh=()=>{
-   getWalletSession().then(session=>{if(active){setWalletAddress(session?.account||"");setWalletChainId(session?.chainId||"");if(session?.account)setDriverWallet(old=>old||session.account);}})
-    .catch(()=>{if(active){setWalletAddress("");setWalletChainId("");}});
+  let sequence=0;
+  let timer:ReturnType<typeof setTimeout>|undefined;
+  const disconnected=()=>{
+   sequence++;if(timer)clearTimeout(timer);
+   if(active){connectedExplicitly.current=false;setWalletAddress("");setWalletChainId("");setHistoryChecked(false);setShowAllHistory(false);}
   };
-  const changed=(_value:unknown)=>refresh();
-  const disconnected=(_value:unknown)=>{if(active){setWalletAddress("");setWalletChainId("");}};
-  refresh();
-  provider.on?.("accountsChanged",changed);
+  const refresh=()=>{
+   if(!connectedExplicitly.current)return;
+   const ticket=++sequence;
+   getWalletSession().then(session=>{
+    if(!active||ticket!==sequence||!connectedExplicitly.current||!session)return;
+    setWalletAddress(session.account);setWalletChainId(session.chainId);
+    setDriverWallet(old=>old||session.account);
+   }).catch(()=>{/* A temporary provider error is not a wallet disconnect. */});
+  };
+  const changed=()=>{setHistoryChecked(false);setShowAllHistory(false);refresh();};
+  const accountsChanged=(value:unknown)=>{
+   if(timer)clearTimeout(timer);
+   if(Array.isArray(value)&&value.length===0){
+    // MetaMask can briefly report no accounts when its confirmation window closes.
+    const ticket=++sequence;
+    timer=setTimeout(async()=>{
+     if(!active||ticket!==sequence||!connectedExplicitly.current)return;
+     try{
+      const session=await getWalletSession();
+      if(!active||ticket!==sequence||!connectedExplicitly.current)return;
+      if(!session)disconnected();else refresh();
+     }catch{/* Do not clear an established wallet on transient RPC errors. */}
+    },1500);
+    return;
+   }
+   changed();
+  };
+  provider.on?.("accountsChanged",accountsChanged);
   provider.on?.("chainChanged",changed);
-  provider.on?.("disconnect",disconnected);
-  return()=>{active=false;provider.removeListener?.("accountsChanged",changed);provider.removeListener?.("chainChanged",changed);provider.removeListener?.("disconnect",disconnected);};
+  // EIP-1193 disconnect describes RPC transport loss, not necessarily account revocation.
+  const transportDisconnected=()=>accountsChanged([]);
+  provider.on?.("disconnect",transportDisconnected);
+  return()=>{active=false;if(timer)clearTimeout(timer);provider.removeListener?.("accountsChanged",accountsChanged);provider.removeListener?.("chainChanged",changed);provider.removeListener?.("disconnect",transportDisconnected);};
  },[]);
  function persistHistory(next:SavedTx[]){
   historyRef.current=next;setTxHistory(next);
@@ -57,7 +90,13 @@ export default function Home(){
   catch{setTxLastError("Browser storage unavailable. Keep this page open until the transaction is confirmed.");}
  }
  useEffect(()=>{
-  // Restore all signed transactions, including a pending hash saved by the earlier release.
+  // Fresh case, without deleting saved transactions or retaining referral tags in demo recordings.
+  setCaseId(newCaseId());
+  const url=new URL(window.location.href);
+  if(url.searchParams.get("utm_source")==="chatgpt.com"){
+   url.searchParams.delete("utm_source");
+   window.history.replaceState(window.history.state,"",url.pathname+url.search+url.hash);
+  }
   try{
    let saved=parseTxHistory(window.localStorage.getItem(TX_HISTORY_KEY));
    const legacy=window.localStorage.getItem(LEGACY_PENDING_KEY);
@@ -75,12 +114,6 @@ export default function Home(){
    }
    historyRef.current=saved;setTxHistory(saved);
    window.localStorage.setItem(TX_HISTORY_KEY,JSON.stringify(saved));
-   const unfinished=newestPendingTx(saved);
-   if(unfinished){
-    setCaseId(unfinished.caseId);
-    setPendingTx({hash:unfinished.hash,method:unfinished.method,caseId:unfinished.caseId});
-    setFeedback("Resumed automatic monitoring of the previously submitted "+unfinished.method+" transaction.");
-   }
   }catch{setTxLastError("Browser storage unavailable; previous transaction history could not be restored.");}
  },[]);
  useEffect(()=>{
@@ -119,6 +152,7 @@ export default function Home(){
   return()=>{cancelled=true;if(timer)clearTimeout(timer);};
  },[pendingTx]);
  function followTransaction(tx:PendingTransaction){
+  setSessionHashes(old=>Array.from(new Set([...old,tx.hash.toLowerCase()])));
   persistHistory(mergeTxHistory(historyRef.current,[{
    ...tx,submittedAt:new Date().toISOString(),status:"Submitted",outcome:"pending",
    message:"Wallet approved. Checking GenLayer automatically."
@@ -127,16 +161,32 @@ export default function Home(){
   setFeedback("TRANSACTION SUBMITTED / "+tx.hash+" · Hash saved automatically. Tracking the network.");
  }
  async function connectWalletUI(){
-  setBusy("wallet_connect");setWalletError("");
-  try{const session=await connectWallet();setWalletAddress(session.account);setWalletChainId(session.chainId);setDriverWallet(old=>old||session.account);}
+  setBusy("wallet_connect");setWalletError("");setHistoryChecked(false);setShowAllHistory(false);
+  try{const session=await connectWallet();connectedExplicitly.current=true;setWalletAddress(session.account);setWalletChainId(session.chainId);setDriverWallet(old=>old||session.account);}
   catch(err){setWalletError(err instanceof Error?err.message:String(err));
-   const session=await getWalletSession().catch(()=>null);setWalletAddress(session?.account||"");setWalletChainId(session?.chainId||"");
+   if(connectedExplicitly.current){const session=await getWalletSession().catch(()=>null);setWalletAddress(session?.account||"");setWalletChainId(session?.chainId||"");}
   }finally{setBusy("");}
+ }
+ function disconnectWalletUI(){
+  connectedExplicitly.current=false;setWalletAddress("");setWalletChainId("");setHistoryChecked(false);setShowAllHistory(false);setWalletError("");
+ }
+ function resumeSavedTransaction(tx:SavedTx){
+  if(!walletReady||pendingTx||busy||tx.outcome!=="pending")return;
+  setCaseId(tx.caseId);setOutput("");setTab("chain");
+  setSessionHashes(old=>Array.from(new Set([...old,tx.hash.toLowerCase()])));
+  setPendingTx({hash:tx.hash,method:tx.method,caseId:tx.caseId});
+  setFeedback("Resumed tracking the saved transaction. No new signature required.");
+ }
+ function checkSavedHistory(){
+  if(!walletReady)return;
+  setHistoryChecked(true);
+  const unfinished=newestPendingTx(historyRef.current.filter(tx=>tx.caseId===caseId));
+  if(unfinished)resumeSavedTransaction(unfinished);
  }
  const allocationId=caseId+":a1";
  function changeCaseId(value:string){
-  if(pendingTx){setFeedback("Wait for the submitted transaction to be resolved before changing Case ID.");return;}
-  setCaseId(value);setFeedback("");setOutput("");
+  if(pendingTx||busy){setFeedback("Wait for the submitted transaction to be resolved before changing Case ID.");return;}
+  setCaseId(value);setFeedback("");setOutput("");setHistoryChecked(false);setShowAllHistory(false);
  }
  function freshCaseId(){changeCaseId(newCaseId());}
  function update(id:string,key:keyof Offer,value:string|number){
@@ -147,12 +197,14 @@ export default function Home(){
   setBusy(method);setFeedback("");
   try{
    if(!signerReady())throw Error("Connect a wallet on GenLayer Studionet before signing.");
+   const unfinished=newestPendingTx(historyRef.current.filter(tx=>tx.caseId===caseId));
+   if(unfinished){setPendingTx({hash:unfinished.hash,method:unfinished.method,caseId:unfinished.caseId});setSessionHashes(old=>Array.from(new Set([...old,unfinished.hash.toLowerCase()])));setFeedback("A saved transaction for this case is pending. Tracking resumed; no duplicate was sent.");return;}
    if(method==="open_case"){
     const caseRecord=await publicRead(matcher,"get_case",[caseId]);
     if(caseExistsFromReadback(caseRecord))throw Error("This Case ID already exists on GenLayer. Check its status or choose New Case ID.");
    }
    // Return immediately with a hash. The background-in-page poller verifies the outcome.
-   const hash=await submitWrite(to==="matcher"?matcher:ledger,method,args,undefined,
+   const hash=await submitWrite(to==="matcher"?matcher:ledger,method,args,walletAddress,
     testGen=>setBusy("Confirm in wallet · estimated protocol fee "+testGen+" test GEN"));
    if(!isTransactionHash(hash))throw Error("Wallet submission returned an invalid transaction hash.");
    followTransaction({hash,method,caseId});
@@ -173,7 +225,7 @@ export default function Home(){
   catch(e){setFeedback("READ FAILED / "+(e instanceof Error?e.message:String(e)));}finally{setBusy("");}
  }
 
- return <main><header className="header"><div className="brand"><div className="mark">L<span>✳</span></div><div>LASTCRATE<small>FOOD RESCUE / GENLAYER</small></div></div><div className="headerActions"><div className="headerTags"><span>02 INTELLIGENT CONTRACTS</span><span>{addressesReady?"ADDRESSES CONFIGURED":"DEPLOYMENT UNVERIFIED"}</span></div><div className="walletTop"><button className={walletReady?"walletConnected":"walletConnect"} disabled={!!busy} onClick={connectWalletUI}>{busy==="wallet_connect"?"Connecting…":walletReady?shortWallet(walletAddress):walletAddress?"Switch to Studionet":"Connect Wallet"}</button>{walletAddress&&<small>{walletReady?"Studionet · Connected":"Wrong network"}</small>}</div></div></header>
+ return <main><header className="header"><div className="brand"><div className="mark">L<span>✳</span></div><div>LASTCRATE<small>FOOD RESCUE / GENLAYER</small></div></div><div className="headerActions"><div className="headerTags"><span>02 INTELLIGENT CONTRACTS</span><span>{addressesReady?"ADDRESSES CONFIGURED":"DEPLOYMENT UNVERIFIED"}</span></div><div className="walletTop"><button className={walletReady?"walletConnected":"walletConnect"} disabled={!!busy} onClick={connectWalletUI}>{busy==="wallet_connect"?"Connecting…":walletReady?shortWallet(walletAddress):walletAddress?"Switch to Studionet":"Connect Wallet"}</button>{walletAddress&&<small>{walletReady?"Studionet · Connected":"Wrong network"}</small>}{walletReady&&<button className="lcTextButton" disabled={!!busy} onClick={disconnectWalletUI}>Disconnect</button>}</div></div></header>
  {tab!=="chain"&&<section className="hero"><div><span className="eyebrow">THE LAST MILE SHOULDN&apos;T BE A GUESS.</span><h1>Rescue the food.<br/><em>Account for every crate.</em></h1><p>Interpret real kitchen intake limits, allocate before the cutoff, and reconcile what both sides actually report receiving.</p></div><div className="heroNumber"><span>CASE / 001</span><strong>18</strong><small>CRATES · LAST-MILE HANDOFF</small></div></section>}
  <nav className="tabs" aria-label="Project sections"><button className={tab==="proof"?"active":""} onClick={()=>setTab("proof")}>01 / On-chain evidence</button><button className={tab==="dispatch"?"active":""} onClick={()=>setTab("dispatch")}>02 / Review scenario</button><button className={tab==="chain"?"active":""} onClick={()=>setTab("chain")}>03 / Sign on GenLayer</button></nav>
 
@@ -189,7 +241,7 @@ export default function Home(){
    <aside className="panel console"><span className="eyebrow">LIVE READ / GENLAYER STUDIONET</span><h2>Check the recorded case yourself.</h2><p className="muted">These read-only calls query the deployed contracts. They require network access but not a wallet signature.</p><label>Allocation ID</label><code>{proof.allocationId}</code><div className="actions"><button disabled={!addressesReady||!!busy} onClick={()=>read("matcher","get_allocation",[proof.allocationId])}>Read allocation</button><button className="secondary" disabled={!addressesReady||!!busy} onClick={()=>read("ledger","get_handoff",[proof.allocationId])}>Read handoff</button></div><div className="feedback" role="status">{busy?"Reading "+busy+"…":feedback||"Select a public read to fetch the latest stored contract result."}</div><pre aria-label="Public on-chain readback">{output||"Contract response appears here. Recorded receipts are shown below."}</pre><div className="actions"><button className="secondary" onClick={()=>{setCaseId(proof.caseId);setOutput("");setFeedback("");setTab("chain");}}>Open recorded case in live workspace</button></div></aside>
   </div>
   <section className="panel proofReceipts"><div className="proofHeading"><div><span className="eyebrow">HANDOFFLEDGER · MATCHED REPORTS</span><h2>Both parties declared six. The ledger reconciled six.</h2></div><span className="proofChip">STATUS / COMPLETE</span></div><div className="proofReconcile"><div><b>6</b><span>Planned</span></div><div><b>6</b><span>Driver report</span></div><div><b>6</b><span>Kitchen report</span></div><div><b>0</b><span>Missing</span></div></div><p className="muted">The ledger records wallet-signed claims and their agreement. It is not independent proof that food was physically delivered.</p>
-   <h3>Transaction trail <small>FINALIZED · CONSENSUS ACCEPTED · GENVM SUCCESS</small></h3><div className="txGrid">{transactions.map((tx,i)=><a key={tx.hash} className="txItem" href={explorerTx(tx.hash)} target="_blank" rel="noopener noreferrer"><span className="txNumber">{String(i+1).padStart(2,"0")}</span><span><b>{tx.label}</b><small>{tx.role} · {tx.method}</small><code>{tx.hash.slice(0,11)}…{tx.hash.slice(-8)}</code></span><span aria-hidden="true">↗</span></a>)}</div>
+   <h3>Transaction trail <small>FINALIZED · CONSENSUS ACCEPTED · GENVM SUCCESS</small></h3>{!pastHistoryVisible?<div className="actions"><button className="secondary" disabled={!walletReady||!!busy} onClick={checkSavedHistory}>{walletReady?"Check recorded transactions":"Connect wallet to check recorded transactions"}</button></div>:<div className="txGrid">{transactions.map((tx,i)=><a key={tx.hash} className="txItem" href={explorerTx(tx.hash)} target="_blank" rel="noopener noreferrer"><span className="txNumber">{String(i+1).padStart(2,"0")}</span><span><b>{tx.label}</b><small>{tx.role} · {tx.method}</small><code>{tx.hash.slice(0,11)}…{tx.hash.slice(-8)}</code></span><span aria-hidden="true">↗</span></a>)}</div>}
    <p className="proofFootnote">Studio evidence and contract readbacks were captured on {proof.captured}. <a href="https://github.com/bearbaba/LASTCRATE/issues/1" target="_blank" rel="noopener noreferrer">Review the full verification log ↗</a></p>
   </section>
  </div>}
@@ -207,7 +259,7 @@ export default function Home(){
      <div className="lcStepHeading"><div><span className="eyebrow">01 · DONOR WALLET</span><h2>Open a donation case</h2></div><span>RescueMatcher</span></div>
      <p className="lcHelper">Create a unique case. The donor signs once; LASTCRATE automatically stores and follows the transaction.</p>
      {existingCase&&<p className="lcAlert">This historical case is already complete. Choose a new Case ID instead of replaying it.</p>}
-     <div className="lcCaseRow"><label>Case ID<input aria-label="Rescue Case ID" value={caseId} maxLength={64} disabled={!!pendingTx} onChange={e=>changeCaseId(e.target.value)}/></label><button className="secondary" disabled={!!pendingTx} onClick={freshCaseId}>New ID</button></div>
+     <div className="lcCaseRow"><label>Case ID<input aria-label="Rescue Case ID" value={caseId} maxLength={64} disabled={!!pendingTx||!!busy} onChange={e=>changeCaseId(e.target.value)}/></label><button className="secondary" disabled={!!pendingTx||!!busy} onClick={freshCaseId}>New ID</button></div>
      <div className="lcFields"><label>Crates<input type="number" min={1} max={10000} value={total} onChange={e=>setTotal(Math.max(1,Number(e.target.value)||1))}/></label><label>Pickup<input disabled value="16:40"/></label><label>Deadline<input type="time" value={deadline} onChange={e=>setDeadline(e.target.value)}/></label><label>Driver wallet<input value={driverWallet} onChange={e=>setDriverWallet(e.target.value)} placeholder="0x…" aria-label="Driver wallet address"/></label></div>
      <div className="lcActions"><button disabled={!addressesReady||!!busy||!caseId||!driverWallet||existingCase||!walletReady||!!pendingTx} onClick={()=>write("matcher","open_case",[caseId,"Vegetable crates",total,"16:40",deadline,driverWallet])}>1 · Donor opens case</button><button className="secondary" disabled={!addressesReady||!!busy||!caseId} onClick={()=>read("matcher","get_case",[caseId])}>Read case</button><button className="lcNext" onClick={()=>setStage("kitchens")}>Kitchens →</button></div>
     </>}
@@ -236,17 +288,19 @@ export default function Home(){
     </>}
    </section>
    <aside className="lcMonitor" aria-label="GenLayer transaction status and evidence">
-    <div className="lcMonitorTitle"><div><span className="eyebrow">GENLAYER STUDIONET</span><h2>Live transaction status</h2></div><span className={pendingTx?"lcMonitorTag following":"lcMonitorTag"}>{pendingTx?"Following…":"Auto-follow"}</span></div>
+    <div className="lcMonitorTitle"><div><span className="eyebrow">GENLAYER STUDIONET</span><h2>Live transaction status</h2></div><span className={walletReady&&pendingTx?"lcMonitorTag following":"lcMonitorTag"}>{walletReady&&pendingTx?"Following…":"Auto-follow"}</span></div>
     {!walletReady&&<p className="lcInfo">Connect your wallet on Studionet (chain 61999). Public reads are available without signing.</p>}
     {walletError&&<p role="alert" className="lcError">{walletError}</p>}
-    {pendingTx&&<div className="lcFollowing" role="status"><span className="txSpinner" aria-hidden="true"/><div><strong>{pendingTx.method}</strong><span>Hash saved · checking on-chain automatically</span><a href={explorerTx(pendingTx.hash)} target="_blank" rel="noopener noreferrer">{shortWallet(pendingTx.hash)} · Explorer ↗</a></div></div>}
-    {txLastError&&<p role="alert" className="lcError">{txLastError} · Don't blindly re-sign.</p>}
-    <div className="lcFeedback" role="status">{busy?"Working: "+busy:feedback||"Approve a wallet transaction to start automatic tracking."}</div>
-    <div className="lcSectionHeading"><h3>Saved transactions <small>({txHistory.length})</small></h3>{txHistory.length>3&&<button className="lcTextButton" onClick={()=>setShowAllHistory(!showAllHistory)}>{showAllHistory?"Show less":"View all"}</button>}</div>
-    {txHistory.length===0?<p className="lcInfo">No transactions signed in this browser yet.</p>:<div className={showAllHistory?"lcTxList expanded":"lcTxList"}>{txHistory.slice(0,showAllHistory?60:3).map(tx=><div className="lcTxRow" key={tx.hash}><div><strong>{tx.method}</strong><span className={"lcTxOutcome "+tx.outcome}>{tx.outcome==="pending"?tx.status:tx.outcome==="verified"?"Verified":tx.outcome==="failed"?"Failed":"Finalized · verify result"}</span></div><p>{tx.message}</p><a target="_blank" rel="noopener noreferrer" href={explorerTx(tx.hash)}>{shortWallet(tx.hash)} · Explorer ↗</a></div>)}</div>}
+    {walletReady&&pendingTx&&<div className="lcFollowing" role="status"><span className="txSpinner" aria-hidden="true"/><div><strong>{pendingTx.method}</strong><span>Hash saved · checking on-chain automatically</span><a href={explorerTx(pendingTx.hash)} target="_blank" rel="noopener noreferrer">{shortWallet(pendingTx.hash)} · Explorer ↗</a></div></div>}
+    {walletReady&&txLastError&&<p role="alert" className="lcError">{txLastError} · Don't blindly re-sign.</p>}
+    <div className="lcFeedback" role="status">{!walletReady?"Connect wallet to view transaction status.":busy?"Working: "+busy:feedback||"Approve a wallet transaction to start automatic tracking."}</div>
+    <div className="lcSectionHeading"><h3>{pastHistoryVisible?"Saved browser transactions":"Current case transactions"} <small>({visibleHistory.length})</small></h3>{visibleHistory.length>3&&<button className="lcTextButton" onClick={()=>setShowAllHistory(!showAllHistory)}>{showAllHistory?"Show less":"View all"}</button>}</div>
+    {walletReady&&!historyChecked&&<div className="lcActions"><button className="secondary" disabled={!!busy} onClick={checkSavedHistory}>Check saved transactions</button></div>}
+    {pastHistoryVisible&&<><p className="lcInfo">Saved on this browser; records may belong to different demo wallets.</p><button className="lcTextButton" onClick={()=>{setHistoryChecked(false);setShowAllHistory(false);}}>Hide saved history</button></>}
+    {visibleHistory.length===0?<p className="lcInfo">{pastHistoryVisible?"No saved transactions in this browser.":"No transactions submitted for this new case yet."}</p>:<div className={showAllHistory?"lcTxList expanded":"lcTxList"}>{visibleHistory.slice(0,showAllHistory?60:3).map(tx=><div className="lcTxRow" key={tx.hash}><div><strong>{tx.method}</strong><span className={"lcTxOutcome "+tx.outcome}>{tx.outcome==="pending"?tx.status:tx.outcome==="verified"?"Verified":tx.outcome==="failed"?"Failed":"Finalized · verify result"}</span></div><p>{tx.message}</p><a target="_blank" rel="noopener noreferrer" href={explorerTx(tx.hash)}>{shortWallet(tx.hash)} · Explorer ↗</a>{pastHistoryVisible&&tx.outcome==="pending"&&<button className="lcTextButton" disabled={!!pendingTx||!!busy} onClick={()=>resumeSavedTransaction(tx)}>Resume tracking</button>}</div>)}</div>}
     <div className="lcSectionHeading"><h3>Contract readback</h3><small>Public · no signature</small></div>
     {output?<pre className="lcReadback">{output}</pre>:<p className="lcInfo">Use Read case, Read allocation, or Read handoff to inspect contract state.</p>}
-    <details className="lcDetails"><summary>Recorded proof and contract addresses</summary><p>Previous COMPLETE handoff: Kitchen A received 6 of 18, with 12 unallocated.</p><div className="lcActions"><button className="secondary" disabled={!addressesReady||!!busy} onClick={()=>read("matcher","get_allocation",[proof.allocationId])}>Read past allocation</button><button className="secondary" disabled={!addressesReady||!!busy} onClick={()=>read("ledger","get_handoff",[proof.allocationId])}>Read past handoff</button></div><p><a href="https://github.com/bearbaba/LASTCRATE/issues/1" target="_blank" rel="noopener noreferrer">Full evidence log ↗</a></p><ul>{transactions.map(tx=><li key={tx.hash}><a target="_blank" rel="noopener noreferrer" href={explorerTx(tx.hash)}>{tx.method} · {shortWallet(tx.hash)}</a></li>)}</ul><p>RescueMatcher <code>{matcher}</code></p><p>HandoffLedger <code>{ledger}</code></p></details>
+    {pastHistoryVisible&&<details className="lcDetails"><summary>Recorded proof and contract addresses</summary><p>Previous COMPLETE handoff: Kitchen A received 6 of 18, with 12 unallocated.</p><div className="lcActions"><button className="secondary" disabled={!addressesReady||!!busy} onClick={()=>read("matcher","get_allocation",[proof.allocationId])}>Read past allocation</button><button className="secondary" disabled={!addressesReady||!!busy} onClick={()=>read("ledger","get_handoff",[proof.allocationId])}>Read past handoff</button></div><p><a href="https://github.com/bearbaba/LASTCRATE/issues/1" target="_blank" rel="noopener noreferrer">Full evidence log ↗</a></p><ul>{transactions.map(tx=><li key={tx.hash}><a target="_blank" rel="noopener noreferrer" href={explorerTx(tx.hash)}>{tx.method} · {shortWallet(tx.hash)}</a></li>)}</ul><p>RescueMatcher <code>{matcher}</code></p><p>HandoffLedger <code>{ledger}</code></p></details>}
    </aside>
   </div>
 </div>}
