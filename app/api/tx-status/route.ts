@@ -19,11 +19,44 @@ async function rpc(method:string,hash:string):Promise<unknown>{
  if(json.error)throw Error("GenLayer RPC: "+(json.error.message||json.error.code||"unknown error"));
  return json.result??null;
 }
+/** Read-only correlation probe: find whether a wallet hash belongs to the EVM envelope instead of GenLayer consensus. */
+async function probeRpc(method:string,params:unknown[]):Promise<{result?:unknown;error?:string}>{
+ try{
+  const response=await fetch(RPC,{method:"POST",headers:{"content-type":"application/json"},
+   body:JSON.stringify({jsonrpc:"2.0",id:1,method,params}),cache:"no-store",signal:AbortSignal.timeout(7000)});
+  if(!response.ok)return {error:"HTTP "+response.status};
+  const result=await response.json() as {result?:unknown;error?:{message?:string}};
+  return result.error?{error:result.error.message||"RPC error"}:{result:result.result??null};
+ }catch(err){return {error:err instanceof Error?err.message:"RPC request failed"};}
+}
 export async function GET(request:NextRequest){
  const hash=request.nextUrl.searchParams.get("hash")||"";
  if(!isTransactionHash(hash)){
   return NextResponse.json({error:"Valid 0x + 64-hex transaction hash required."},{status:400,headers:noCache});
  }
+ if(request.nextUrl.searchParams.get("probe")==="1"){
+  // This never submits, signs, or resends a transaction.
+  const [chainId,evmTx,evmReceipt,genStatus]=await Promise.all([
+   probeRpc("eth_chainId",[]),
+   probeRpc("eth_getTransactionByHash",[hash]),
+   probeRpc("eth_getTransactionReceipt",[hash]),
+   probeRpc("gen_getTransactionStatus",[{txId:hash}])
+  ]);
+  const tx=evmTx.result&&typeof evmTx.result==="object"?evmTx.result as Record<string,unknown>:null;
+  const receipt=evmReceipt.result&&typeof evmReceipt.result==="object"?evmReceipt.result as Record<string,unknown>:null;
+  return NextResponse.json({
+   hash,studionetChainId:"0xf22f",rpcChainId:typeof chainId.result==="string"?chainId.result:null,
+   evm:{found:!!tx,receiptFound:!!receipt,receiptStatus:receipt?.status??null,
+    recipient:typeof tx?.to==="string"?tx.to:null,blockNumber:tx?.blockNumber??null},
+   genlayer:{status:genStatus.result??null},
+   diagnosticErrors:{
+    chainId:chainId.error??null,evmTx:evmTx.error??null,evmReceipt:evmReceipt.error??null,gen:genStatus.error??null
+   },
+   checkedAt:new Date().toISOString(),
+   note:"Read-only check. EVM hash and GenLayer protocol transaction ID may differ; neither implies successful contract execution."
+  },{headers:noCache});
+ }
+
  let rawStatus:unknown=null,rawReceipt:unknown=null;
  let statusError="",receiptError="",dataError="";
  try{rawStatus=await rpc("gen_getTransactionStatus",hash);}
