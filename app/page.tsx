@@ -101,6 +101,13 @@ export default function Home(){
   setPendingTx(tx);
   setFeedback("TRANSACTION SUBMITTED / "+tx.hash+" · Monitoring GenLayer consensus and finalization; do not send another write while pending.");
  }
+ function stopFollowing(){
+  if(!pendingTx)return;
+  window.localStorage.removeItem(PENDING_KEY);
+  setPendingTx(null);
+  setTxLastError("");
+  setFeedback("Stopped monitoring "+pendingTx.hash+". Transaction outcome remains unverified; stopping tracking does not cancel the blockchain transaction. Check Explorer and the case record before any new write.");
+ }
  function followEnteredHash(){
   const hash=trackHash.trim();
   if(!isTransactionHash(hash)){setTxLastError("Enter a full 0x + 64-character GenLayer transaction hash.");return;}
@@ -196,7 +203,7 @@ export default function Home(){
   {!pendingTx&&txProgress&&<div className="txTrackingState" role="status"><strong>{txProgress.verified?"Verified success":txProgress.terminalFailure?"No verified success":txProgress.status}</strong><span>{txProgress.message}</span><a target="_blank" rel="noopener noreferrer" href={explorerTx(txProgress.hash)}>Open transaction in Explorer ↗</a></div>}
   {txLastError&&<p className="walletError" role="alert">{txLastError} · The transaction outcome remains unverified.</p>}
   <label>Existing transaction hash</label><input aria-label="GenLayer transaction hash" value={trackHash} onChange={e=>setTrackHash(e.target.value)} placeholder="0x + 64 hexadecimal characters" spellCheck={false}/>
-  <div className="actions"><button className="secondary" disabled={!!pendingTx||!!busy} onClick={followEnteredHash}>Follow transaction</button></div>
+  <div className="actions"><button className="secondary" disabled={!!pendingTx||!!busy} onClick={followEnteredHash}>Follow transaction</button>{pendingTx&&<button className="secondary" disabled={!!busy} onClick={stopFollowing}>Stop monitoring (does not cancel transaction)</button>}</div>
   <p className="muted">Checks the on-chain status automatically while this page is open, and resumes after a reload. A timeout is not a failed transaction. Never re-sign solely because status is pending or unavailable.</p>
  </section>
  <label>RescueMatcher</label><code>{matcher||"Not configured"}</code><label>HandoffLedger</label><code>{ledger||"Not configured"}</code><div className="feedback" role="status">{busy?"In progress: "+busy:feedback||"Connect a wallet to start, or use a read-only contract query."}</div><pre aria-label="Contract readback">{output||"Public contract readback appears here."}</pre>{sessionTxs.length>0&&<div className="sessionTx"><span className="eyebrow">SUBMITTED WRITES · THIS SESSION</span>{sessionTxs.map((entry,i)=><a key={entry.hash+i} target="_blank" rel="noopener noreferrer" href={explorerTx(entry.hash)}>{i+1}. {entry.method} · {shortWallet(entry.hash)} ↗</a>)}</div>}</aside>
