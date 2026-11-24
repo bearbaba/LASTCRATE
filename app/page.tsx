@@ -14,7 +14,7 @@ const matcher=process.env.NEXT_PUBLIC_RESCUE_MATCHER_ADDRESS||"";
 const ledger=process.env.NEXT_PUBLIC_HANDOFF_LEDGER_ADDRESS||"";
 const shortWallet=(address:string)=>address.slice(0,6)+"…"+address.slice(-4);
 export default function Home(){
- const [tab,setTab]=useState<Tab>("chain");
+ const [tab,setTab]=useState<Tab>("proof");
  const [stage,setStage]=useState<Stage>("donation");
  const [showAllHistory,setShowAllHistory]=useState(false);
  const [historyChecked,setHistoryChecked]=useState(false);
@@ -38,37 +38,49 @@ export default function Home(){
  const existingCase=caseId===proof.caseId;
  const walletReady=!!walletAddress&&isStudionetChain(walletChainId);
  const pastHistoryVisible=walletReady&&historyChecked;
- const visibleHistory=txHistory.filter(tx=>pastHistoryVisible||(tx.caseId===caseId&&sessionHashes.includes(tx.hash.toLowerCase())));
+ const visibleHistory=walletReady?txHistory.filter(tx=>pastHistoryVisible||(tx.caseId===caseId&&sessionHashes.includes(tx.hash.toLowerCase()))):[];
  function signerReady():boolean{return walletReady;}
  useEffect(()=>{
   const provider=getInjectedProvider();
   if(!provider)return;
   let active=true;
   let sequence=0;
+  let timer:ReturnType<typeof setTimeout>|undefined;
   const disconnected=()=>{
-   sequence++;
-   if(active){setWalletAddress("");setWalletChainId("");setHistoryChecked(false);setShowAllHistory(false);}
+   sequence++;if(timer)clearTimeout(timer);
+   if(active){connectedExplicitly.current=false;setWalletAddress("");setWalletChainId("");setHistoryChecked(false);setShowAllHistory(false);}
   };
   const refresh=()=>{
    if(!connectedExplicitly.current)return;
    const ticket=++sequence;
    getWalletSession().then(session=>{
-    if(!active||ticket!==sequence)return;
-    if(!session){disconnected();return;}
+    if(!active||ticket!==sequence||!connectedExplicitly.current||!session)return;
     setWalletAddress(session.account);setWalletChainId(session.chainId);
     setDriverWallet(old=>old||session.account);
-   }).catch(()=>{if(active&&ticket===sequence)disconnected();});
+   }).catch(()=>{/* A temporary provider error is not a wallet disconnect. */});
   };
   const changed=()=>{setHistoryChecked(false);setShowAllHistory(false);refresh();};
   const accountsChanged=(value:unknown)=>{
-   if(Array.isArray(value)&&value.length===0){disconnected();return;}
+   if(timer)clearTimeout(timer);
+   if(Array.isArray(value)&&value.length===0){
+    // MetaMask can briefly report no accounts when its confirmation window closes.
+    const ticket=++sequence;
+    timer=setTimeout(async()=>{
+     if(!active||ticket!==sequence||!connectedExplicitly.current)return;
+     try{
+      const session=await getWalletSession();
+      if(!active||ticket!==sequence||!connectedExplicitly.current)return;
+      if(!session)disconnected();else refresh();
+     }catch{/* Do not clear an established wallet on transient RPC errors. */}
+    },1500);
+    return;
+   }
    changed();
   };
-  window.addEventListener("focus",refresh);
   provider.on?.("accountsChanged",accountsChanged);
   provider.on?.("chainChanged",changed);
   provider.on?.("disconnect",disconnected);
-  return()=>{active=false;window.removeEventListener("focus",refresh);provider.removeListener?.("accountsChanged",accountsChanged);provider.removeListener?.("chainChanged",changed);provider.removeListener?.("disconnect",disconnected);};
+  return()=>{active=false;if(timer)clearTimeout(timer);provider.removeListener?.("accountsChanged",accountsChanged);provider.removeListener?.("chainChanged",changed);provider.removeListener?.("disconnect",disconnected);};
  },[]);
  function persistHistory(next:SavedTx[]){
   historyRef.current=next;setTxHistory(next);
@@ -153,6 +165,9 @@ export default function Home(){
    if(connectedExplicitly.current){const session=await getWalletSession().catch(()=>null);setWalletAddress(session?.account||"");setWalletChainId(session?.chainId||"");}
   }finally{setBusy("");}
  }
+ function disconnectWalletUI(){
+  connectedExplicitly.current=false;setWalletAddress("");setWalletChainId("");setHistoryChecked(false);setShowAllHistory(false);setWalletError("");
+ }
  function resumeSavedTransaction(tx:SavedTx){
   if(!walletReady||pendingTx||busy||tx.outcome!=="pending")return;
   setCaseId(tx.caseId);setOutput("");setTab("chain");
@@ -168,7 +183,7 @@ export default function Home(){
  }
  const allocationId=caseId+":a1";
  function changeCaseId(value:string){
-  if(pendingTx){setFeedback("Wait for the submitted transaction to be resolved before changing Case ID.");return;}
+  if(pendingTx||busy){setFeedback("Wait for the submitted transaction to be resolved before changing Case ID.");return;}
   setCaseId(value);setFeedback("");setOutput("");setHistoryChecked(false);setShowAllHistory(false);
  }
  function freshCaseId(){changeCaseId(newCaseId());}
@@ -208,7 +223,7 @@ export default function Home(){
   catch(e){setFeedback("READ FAILED / "+(e instanceof Error?e.message:String(e)));}finally{setBusy("");}
  }
 
- return <main><header className="header"><div className="brand"><div className="mark">L<span>✳</span></div><div>LASTCRATE<small>FOOD RESCUE / GENLAYER</small></div></div><div className="headerActions"><div className="headerTags"><span>02 INTELLIGENT CONTRACTS</span><span>{addressesReady?"ADDRESSES CONFIGURED":"DEPLOYMENT UNVERIFIED"}</span></div><div className="walletTop"><button className={walletReady?"walletConnected":"walletConnect"} disabled={!!busy} onClick={connectWalletUI}>{busy==="wallet_connect"?"Connecting…":walletReady?shortWallet(walletAddress):walletAddress?"Switch to Studionet":"Connect Wallet"}</button>{walletAddress&&<small>{walletReady?"Studionet · Connected":"Wrong network"}</small>}</div></div></header>
+ return <main><header className="header"><div className="brand"><div className="mark">L<span>✳</span></div><div>LASTCRATE<small>FOOD RESCUE / GENLAYER</small></div></div><div className="headerActions"><div className="headerTags"><span>02 INTELLIGENT CONTRACTS</span><span>{addressesReady?"ADDRESSES CONFIGURED":"DEPLOYMENT UNVERIFIED"}</span></div><div className="walletTop"><button className={walletReady?"walletConnected":"walletConnect"} disabled={!!busy} onClick={connectWalletUI}>{busy==="wallet_connect"?"Connecting…":walletReady?shortWallet(walletAddress):walletAddress?"Switch to Studionet":"Connect Wallet"}</button>{walletAddress&&<small>{walletReady?"Studionet · Connected":"Wrong network"}</small>}{walletReady&&<button className="lcTextButton" disabled={!!busy} onClick={disconnectWalletUI}>Disconnect</button>}</div></div></header>
  {tab!=="chain"&&<section className="hero"><div><span className="eyebrow">THE LAST MILE SHOULDN&apos;T BE A GUESS.</span><h1>Rescue the food.<br/><em>Account for every crate.</em></h1><p>Interpret real kitchen intake limits, allocate before the cutoff, and reconcile what both sides actually report receiving.</p></div><div className="heroNumber"><span>CASE / 001</span><strong>18</strong><small>CRATES · LAST-MILE HANDOFF</small></div></section>}
  <nav className="tabs" aria-label="Project sections"><button className={tab==="proof"?"active":""} onClick={()=>setTab("proof")}>01 / On-chain evidence</button><button className={tab==="dispatch"?"active":""} onClick={()=>setTab("dispatch")}>02 / Review scenario</button><button className={tab==="chain"?"active":""} onClick={()=>setTab("chain")}>03 / Sign on GenLayer</button></nav>
 
@@ -242,7 +257,7 @@ export default function Home(){
      <div className="lcStepHeading"><div><span className="eyebrow">01 · DONOR WALLET</span><h2>Open a donation case</h2></div><span>RescueMatcher</span></div>
      <p className="lcHelper">Create a unique case. The donor signs once; LASTCRATE automatically stores and follows the transaction.</p>
      {existingCase&&<p className="lcAlert">This historical case is already complete. Choose a new Case ID instead of replaying it.</p>}
-     <div className="lcCaseRow"><label>Case ID<input aria-label="Rescue Case ID" value={caseId} maxLength={64} disabled={!!pendingTx} onChange={e=>changeCaseId(e.target.value)}/></label><button className="secondary" disabled={!!pendingTx} onClick={freshCaseId}>New ID</button></div>
+     <div className="lcCaseRow"><label>Case ID<input aria-label="Rescue Case ID" value={caseId} maxLength={64} disabled={!!pendingTx||!!busy} onChange={e=>changeCaseId(e.target.value)}/></label><button className="secondary" disabled={!!pendingTx||!!busy} onClick={freshCaseId}>New ID</button></div>
      <div className="lcFields"><label>Crates<input type="number" min={1} max={10000} value={total} onChange={e=>setTotal(Math.max(1,Number(e.target.value)||1))}/></label><label>Pickup<input disabled value="16:40"/></label><label>Deadline<input type="time" value={deadline} onChange={e=>setDeadline(e.target.value)}/></label><label>Driver wallet<input value={driverWallet} onChange={e=>setDriverWallet(e.target.value)} placeholder="0x…" aria-label="Driver wallet address"/></label></div>
      <div className="lcActions"><button disabled={!addressesReady||!!busy||!caseId||!driverWallet||existingCase||!walletReady||!!pendingTx} onClick={()=>write("matcher","open_case",[caseId,"Vegetable crates",total,"16:40",deadline,driverWallet])}>1 · Donor opens case</button><button className="secondary" disabled={!addressesReady||!!busy||!caseId} onClick={()=>read("matcher","get_case",[caseId])}>Read case</button><button className="lcNext" onClick={()=>setStage("kitchens")}>Kitchens →</button></div>
     </>}
@@ -271,12 +286,12 @@ export default function Home(){
     </>}
    </section>
    <aside className="lcMonitor" aria-label="GenLayer transaction status and evidence">
-    <div className="lcMonitorTitle"><div><span className="eyebrow">GENLAYER STUDIONET</span><h2>Live transaction status</h2></div><span className={pendingTx?"lcMonitorTag following":"lcMonitorTag"}>{pendingTx?"Following…":"Auto-follow"}</span></div>
-    {!walletReady&&<p className="lcInfo">{pendingTx?"Wallet disconnected or on another network. The submitted transaction is still being tracked. Reconnect only for the next signature.":"Connect your wallet on Studionet (chain 61999). Public reads are available without signing."}</p>}
+    <div className="lcMonitorTitle"><div><span className="eyebrow">GENLAYER STUDIONET</span><h2>Live transaction status</h2></div><span className={walletReady&&pendingTx?"lcMonitorTag following":"lcMonitorTag"}>{walletReady&&pendingTx?"Following…":"Auto-follow"}</span></div>
+    {!walletReady&&<p className="lcInfo">Connect your wallet on Studionet (chain 61999). Public reads are available without signing.</p>}
     {walletError&&<p role="alert" className="lcError">{walletError}</p>}
-    {pendingTx&&<div className="lcFollowing" role="status"><span className="txSpinner" aria-hidden="true"/><div><strong>{pendingTx.method}</strong><span>Hash saved · checking on-chain automatically</span><a href={explorerTx(pendingTx.hash)} target="_blank" rel="noopener noreferrer">{shortWallet(pendingTx.hash)} · Explorer ↗</a></div></div>}
-    {txLastError&&<p role="alert" className="lcError">{txLastError} · Don't blindly re-sign.</p>}
-    <div className="lcFeedback" role="status">{busy?"Working: "+busy:feedback||"Approve a wallet transaction to start automatic tracking."}</div>
+    {walletReady&&pendingTx&&<div className="lcFollowing" role="status"><span className="txSpinner" aria-hidden="true"/><div><strong>{pendingTx.method}</strong><span>Hash saved · checking on-chain automatically</span><a href={explorerTx(pendingTx.hash)} target="_blank" rel="noopener noreferrer">{shortWallet(pendingTx.hash)} · Explorer ↗</a></div></div>}
+    {walletReady&&txLastError&&<p role="alert" className="lcError">{txLastError} · Don't blindly re-sign.</p>}
+    <div className="lcFeedback" role="status">{!walletReady?"Connect wallet to view transaction status.":busy?"Working: "+busy:feedback||"Approve a wallet transaction to start automatic tracking."}</div>
     <div className="lcSectionHeading"><h3>{pastHistoryVisible?"Saved browser transactions":"Current case transactions"} <small>({visibleHistory.length})</small></h3>{visibleHistory.length>3&&<button className="lcTextButton" onClick={()=>setShowAllHistory(!showAllHistory)}>{showAllHistory?"Show less":"View all"}</button>}</div>
     {walletReady&&!historyChecked&&<div className="lcActions"><button className="secondary" disabled={!!busy} onClick={checkSavedHistory}>Check saved transactions</button></div>}
     {pastHistoryVisible&&<><p className="lcInfo">Saved on this browser; records may belong to different demo wallets.</p><button className="lcTextButton" onClick={()=>{setHistoryChecked(false);setShowAllHistory(false);}}>Hide saved history</button></>}
