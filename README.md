@@ -4,7 +4,9 @@ LASTCRATE coordinates a time-sensitive donation with receiving kitchens, interpr
 
 **Live application:** https://lastcrate.vercel.app/  
 **GenLayer network:** Studionet (test network)  
-**Evidence log:** https://github.com/bearbaba/LASTCRATE/issues/1
+**Latest browser-wallet demo:** https://youtu.be/23loPLir3tY  
+**Steward review:** [VERIFICATION.md](VERIFICATION.md) — 24 November 2026, seven browser-wallet writes  
+**Historical Studio evidence log:** https://github.com/bearbaba/LASTCRATE/issues/1
 
 ## Deployed intelligent contracts
 
@@ -55,7 +57,7 @@ Inside the signing tab the compact four-stage workspace remains:
 3. **Consensus match:** the donor signs `seal_case` and `match_case` separately, then reads the actual allocation.
 4. **Signed handoff:** driver and selected kitchen separately sign their quantities, then read the real `HandoffLedger` result.
 
-The signing tab keeps its GenLayer status and saved transaction history in a side rail. On desktop only that panel or rail needs internal scrolling when the window is short; the other original product pages retain natural scrolling. Wallet signatures must always be approved by the user. A GenLayer transaction is automatically saved and followed in the same browser after its hash is returned, and monitoring resumes after reload.
+The signing tab keeps its GenLayer status and saved transaction history in a side rail. On desktop only that panel or rail needs internal scrolling when the window is short; the other original product pages retain natural scrolling. Wallet signatures must always be approved by the user. A GenLayer transaction is automatically saved and followed in the same browser after its hash is returned, and saved pending transactions can be resumed explicitly after reconnecting.
 
 All seed data remains editable. Deterministic local estimates are not represented as real consensus, and signed delivery counts are not independent physical delivery proof.
 
@@ -69,7 +71,7 @@ LASTCRATE now probes the active Studio version and the chain identity **before s
 - **Legacy Studio:** uses the existing `genlayer-js` 1.1.x client. It is selected **only** if the RPC explicitly reports that `sim_getFeeConfig` does not exist.
 - **RPC failure or unexpected chain/version:** signing is blocked and no transaction is submitted. No write is silently retried.
 
-A read-only fee quotation for `RescueMatcher.open_case` using the pinned v0.6 SDK succeeded on the hosted Studionet on November 24, 2026, with a nonzero test-GEN budget. The temporary quotation test endpoint was removed after validation. **Browser-wallet end-to-end success remains unverified until an owner-approved new write is accepted by GenLayer and the matching contract readback is confirmed.** The previous seven GenLayer Studio transactions and on-chain records remain separate historical evidence.
+A read-only fee quotation for `RescueMatcher.open_case` using the pinned v0.6 SDK succeeded on the hosted Studionet on November 24, 2026, with a nonzero test-GEN budget. The temporary quotation test endpoint was removed after validation. **Update (24 November 2026):** a separate browser-wallet case completed all seven writes through the web application, with allocation and handoff readbacks and final Explorer evidence. See [VERIFICATION.md](VERIFICATION.md). The earlier Studio case remains separate historical evidence.
 
 ## Connect Wallet and sign a rescue case
 
@@ -85,11 +87,11 @@ Wallet connection does not submit a transaction or require private keys. Any wal
 
 The **Live GenLayer → Verification console** automatically follows the exact transaction that the connected wallet just signed. As soon as GenLayerJS returns a transaction hash, LASTCRATE saves the case ID, method, hash, submission time, latest status and any later on-chain updates in this browser's local storage. Users **do not** paste transaction IDs or click a separate Follow button.
 
-While the browser tab is open, a visible loading indicator shows that the site checks the same-origin read-only endpoint `/api/tx-status` approximately every seven seconds. The status can progress through pending, proposing, committing, accepted and finalized. After a reload, previously saved history reappears automatically, and an unfinished transaction resumes polling. Earlier pending hashes from the former single-hash storage key are migrated. The history is bounded to 60 recent hashes and stores public metadata only; no private keys or wallet secrets.
+While the browser tab is open, a visible loading indicator shows that the site checks the same-origin read-only endpoint `/api/tx-status` approximately every seven seconds. The status can progress through pending, proposing, committing, accepted and finalized. After a reload, a fresh case is selected unless a case-specific URL is supplied. Saved history is hidden by default and can be inspected after connecting and selecting Check saved transactions; unfinished hashes can be resumed without re-signing. Earlier pending hashes from the former single-hash storage key are migrated. The history is bounded to 60 recent hashes and stores public metadata only; no private keys or wallet secrets.
 
 If the SDK throws an error containing a 32-byte transaction hash, the app also saves that hash and follows it instead of treating a timeout as a rejected transaction. If the wallet never returns a usable hash, the app explains that it cannot reconstruct one from nothing. Storage is **local to the same browser/device**; clearing browser data or using another device loses that local history. It is not a hosted database or a background notification service.
 
-The follower reports verified success only on FINALIZED with accepted consensus and successful execution. The current Studionet RPC can return FINALIZED without exposing a detailed receipt, in which case LASTCRATE explicitly says **finalized / result unverified**; inspect the public case, allocation or handoff readback. Unknown network status, missing transactions and RPC errors must not be presented as definitive failures. No wallet write is automatically retried.
+The follower reports verified receipt success only on FINALIZED with accepted consensus and successful execution. It also automatically reads the relevant contract state. The current Studionet RPC can return FINALIZED without exposing a detailed receipt; in that case LASTCRATE distinguishes observed contract state from verified receipt success. Inspect the public case, allocation or handoff readback and Explorer. Unknown network status, missing transactions and RPC errors must not be presented as definitive failures. No wallet write is automatically retried.
 
 ## Trust boundaries
 
