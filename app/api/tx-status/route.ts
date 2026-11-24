@@ -25,20 +25,33 @@ export async function GET(request:NextRequest){
   return NextResponse.json({error:"Valid 0x + 64-hex transaction hash required."},{status:400,headers:noCache});
  }
  let rawStatus:unknown=null,rawReceipt:unknown=null;
- let statusError="";
+ let statusError="",receiptError="";
  try{rawStatus=await rpc("gen_getTransactionStatus",hash);}
  catch(error){statusError=error instanceof Error?error.message:String(error);}
  const status=rawStatus as {statusCode?:unknown;status?:unknown}|null;
  const code=Number(status?.statusCode);
- const checkReceipt=statusError||code===5||code===6||code===7||code===8||
+ const checkReceipt=!!statusError||code===5||code===6||code===7||code===8||
   ["accepted","undetermined","finalized","canceled"].includes(String(status?.status||"").toLowerCase());
  if(checkReceipt){
-  try{rawReceipt=await rpc("gen_getTransactionReceipt",hash);}
-  catch(error){if(!statusError)statusError=error instanceof Error?error.message:String(error);}
+  // Newer GenLayer nodes expose getTransactionData; older ones may only serve Receipt.
+  try{rawReceipt=await rpc("gen_getTransactionData",hash);}
+  catch(error){receiptError=error instanceof Error?error.message:String(error);}
+  if(rawReceipt===null){
+   try{rawReceipt=await rpc("gen_getTransactionReceipt",hash);}
+   catch(error){receiptError=error instanceof Error?error.message:String(error);}
+  }
  }
  if(rawStatus===null&&rawReceipt===null){
-  return NextResponse.json({error:"GenLayer RPC temporarily unavailable: "+statusError},{status:502,headers:noCache});
+  if(/transaction\\s+0x[0-9a-f]+\\s+not found/i.test(statusError)){
+   const missing=normalizeSnapshot(hash,{status:"Uninitialized",statusCode:0},null);
+   return NextResponse.json({...missing,
+    message:"Transaction not found on GenLayer Studionet yet. Check the hash and wallet network; do not re-sign without verifying the case.",
+    network:"GenLayer Studionet",checkedAt:new Date().toISOString()},{headers:noCache});
+  }
+  return NextResponse.json({error:"GenLayer RPC currently cannot read the transaction status."},{status:502,headers:noCache});
  }
  const normalized=normalizeSnapshot(hash,rawStatus,rawReceipt);
- return NextResponse.json({...normalized,network:"GenLayer Studionet",checkedAt:new Date().toISOString()},{headers:noCache});
+ return NextResponse.json({...normalized,receiptAvailable:rawReceipt!==null,
+  receiptCheckPending:rawReceipt===null&&!!receiptError,
+  network:"GenLayer Studionet",checkedAt:new Date().toISOString()},{headers:noCache});
 }
