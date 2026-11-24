@@ -28,6 +28,14 @@ export async function GET(request:NextRequest){
  let statusError="",receiptError="",dataError="";
  try{rawStatus=await rpc("gen_getTransactionStatus",hash);}
  catch(error){statusError=error instanceof Error?error.message:String(error);}
+ // Some Studio nodes respond with "Transaction <hash> not found" before indexing.
+ // This is not a transient server outage and must never be reported as a failed write.
+ if(rawStatus===null&&/not found|does not exist|unknown transaction/i.test(statusError)){
+  const missing=normalizeSnapshot(hash,{status:"Uninitialized",statusCode:0},null);
+  return NextResponse.json({...missing,
+   message:"Transaction not found on GenLayer Studionet yet. Confirm the wallet network and check the case record; do not blindly re-sign.",
+   network:"GenLayer Studionet",checkedAt:new Date().toISOString()},{headers:noCache});
+ }
  const status=rawStatus as {statusCode?:unknown;status?:unknown}|null;
  const code=Number(status?.statusCode);
  const checkReceipt=!!statusError||code===5||code===6||code===7||code===8||
@@ -42,17 +50,14 @@ export async function GET(request:NextRequest){
   }
  }
  if(rawStatus===null&&rawReceipt===null){
-  if(/transaction\\s+0x[0-9a-f]+\\s+not found/i.test(statusError)){
-   const missing=normalizeSnapshot(hash,{status:"Uninitialized",statusCode:0},null);
-   return NextResponse.json({...missing,
-    message:"Transaction not found on GenLayer Studionet yet. Check the hash and wallet network; do not re-sign without verifying the case.",
-    network:"GenLayer Studionet",checkedAt:new Date().toISOString()},{headers:noCache});
-  }
   return NextResponse.json({error:"GenLayer RPC currently cannot read the transaction status."},{status:502,headers:noCache});
  }
  const normalized=normalizeSnapshot(hash,rawStatus,rawReceipt);
- return NextResponse.json({...normalized,receiptAvailable:rawReceipt!==null,
-  receiptCheckPending:rawReceipt===null&&!!receiptError,
-  receiptDiagnostic:rawReceipt===null?[dataError,receiptError].filter(Boolean).map(x=>x.slice(0,180)):undefined,
+ const receiptUnsupported=/method not found/i.test(dataError)&&/method not found/i.test(receiptError);
+ const message=normalized.finalized&&receiptUnsupported?
+  "FINALIZED on Studionet. This RPC does not expose the detailed receipt. Verify the contract readback and Explorer before proceeding.":
+  normalized.message;
+ return NextResponse.json({...normalized,message,
+  receiptAvailable:rawReceipt!==null,receiptUnsupported,
   network:"GenLayer Studionet",checkedAt:new Date().toISOString()},{headers:noCache});
 }
