@@ -79,8 +79,10 @@ export default function Home(){
   };
   provider.on?.("accountsChanged",accountsChanged);
   provider.on?.("chainChanged",changed);
-  provider.on?.("disconnect",disconnected);
-  return()=>{active=false;if(timer)clearTimeout(timer);provider.removeListener?.("accountsChanged",accountsChanged);provider.removeListener?.("chainChanged",changed);provider.removeListener?.("disconnect",disconnected);};
+  // EIP-1193 disconnect describes RPC transport loss, not necessarily account revocation.
+  const transportDisconnected=()=>accountsChanged([]);
+  provider.on?.("disconnect",transportDisconnected);
+  return()=>{active=false;if(timer)clearTimeout(timer);provider.removeListener?.("accountsChanged",accountsChanged);provider.removeListener?.("chainChanged",changed);provider.removeListener?.("disconnect",transportDisconnected);};
  },[]);
  function persistHistory(next:SavedTx[]){
   historyRef.current=next;setTxHistory(next);
