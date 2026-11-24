@@ -4,6 +4,7 @@ import {ExecutionResult,TransactionStatus} from "genlayer-js/types";
 import {studionet} from "genlayer-js/chains";
 import {createClient as createV06Client} from "genlayer-js-v2";
 import {studionet as studionetV06} from "genlayer-js-v2/chains";
+import {assertStudioCompatible,confirmedFeeOptions,formatFeeInTestGen,type StudioLine} from "./studio-compat";
 export type Provider={
  request:(args:{method:string;params?:unknown[]})=>Promise<unknown>;
  on?:(event:string,handler:(value:unknown)=>void)=>void;
@@ -11,15 +12,12 @@ export type Provider={
 };
 export type WalletSession={account:string;chainId:string};
 export const STUDIONET_CHAIN_ID="0xf22f"; // 61999, GenLayer hosted Studionet
-export type StudioLine="v0.6"|"legacy";
 /** Probe the server against the exact Studio RPC before each write. Fail closed on unknown node versions. */
 export async function checkStudioCompatibility():Promise<StudioLine>{
  const response=await fetch("/api/studio-compat",{cache:"no-store",signal:AbortSignal.timeout(12000)});
  if(!response.ok)throw Error("Cannot verify the active GenLayer Studio network; signing is disabled.");
  const data=await response.json() as {studioLine?:string;chainId?:string};
- if(data.chainId!==STUDIONET_CHAIN_ID)throw Error("GenLayer Studio RPC chain ID differs from 61999; signing blocked.");
- if(data.studioLine==="v0.6"||data.studioLine==="legacy")return data.studioLine;
- throw Error("Unable to determine Studio consensus version. No wallet transaction was sent.");
+ return assertStudioCompatible(data);
 }
 
 export function getInjectedProvider():Provider|null{
@@ -70,7 +68,7 @@ export function assertAcceptedExecution(tx:CommittedReceipt):void{
   throw Error("GenVM execution was not successful: "+(tx.txExecutionResultName||"unknown"));
 }
 function address(value:string){if(!/^0x[0-9a-fA-F]{40}$/.test(value))throw Error("Deployed 0x contract address required.");return value;}
-export async function submitWrite(target:string,method:string,args:(string|number)[],expectedSigner?:string){
+export async function submitWrite(target:string,method:string,args:(string|number)[],expectedSigner?:string,onFeeEstimate?:(testGen:string)=>void){
  if(typeof window==="undefined")throw Error("Browser wallet required.");
  const provider=getInjectedProvider();
  if(!provider)throw Error("Connect an EIP-1193 browser wallet first.");
@@ -89,16 +87,16 @@ export async function submitWrite(target:string,method:string,args:(string|numbe
   if(!isStudionetChain(current.chainId))throw Error("GenLayer Studionet is not selected.");
   const call={address:address(target) as `0x${string}`,functionName:method,args,value:BigInt(0)};
   const quote=await client.estimateTransactionFeesForWrite(call);
-  if(!quote||quote.feeValue===undefined||!quote.distribution)
-   throw Error("GenLayer v0.6 fee estimate unavailable. Signing stopped before MetaMask.");
-  // Explicit fee budget is mandatory on upgraded Studio, not optional gas guessing.
-  return client.writeContract({
-   ...call,fees:{
-    distribution:quote.distribution,
-    feeValue:quote.feeValue,
-    ...(quote.messageAllocations?{messageAllocations:quote.messageAllocations}:{})
-   }
-  });
+  const fees=confirmedFeeOptions(quote);
+  // A fee quote can take several seconds. Ensure the signer did not change meanwhile.
+  const stillCurrent=await getWalletSession();
+  if(!stillCurrent||!isStudionetChain(stillCurrent.chainId)||
+    !isExpectedSigner(stillCurrent.account,expectedSigner)||
+    stillCurrent.account.toLowerCase()!==sender.toLowerCase()){
+   throw Error("Wallet changed during fee estimation. No transaction was submitted.");
+  }
+  onFeeEstimate?.(formatFeeInTestGen(fees.feeValue));
+  return client.writeContract({...call,fees});
  }
  const client=createClient({chain:studionet,account:sender as never,provider});
  await client.connect("studionet");
